@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""m5ctl — command-line interface for the M5StickC NexStar clinometer."""
+
+import asyncio
+import argparse
+import sys
+from bleak import BleakClient, BleakScanner, BleakError
+
+DEFAULT_ADDRESS = "F0:24:F9:9B:E2:52"
+CONNECT_TIMEOUT = 10.0
+
+CMD_UUID    = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
+RESP_UUID   = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
+STATUS_UUID = "7d91b003-8f3b-4b63-b6a4-5d1e6b7a1000"
+
+
+async def send_and_receive(address: str, command: str, timeout: float) -> str:
+    """Connect, send one command, wait for the notify response, disconnect."""
+    loop = asyncio.get_running_loop()
+    fut: "asyncio.Future[str]" = loop.create_future()
+
+    def on_notify(_, data: bytearray) -> None:
+        if not fut.done():
+            fut.set_result(data.decode("utf-8", errors="replace").strip())
+
+    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+        await client.start_notify(RESP_UUID, on_notify)
+        await client.write_gatt_char(CMD_UUID, command.encode("utf-8"), response=False)
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+        except asyncio.TimeoutError:
+            print(f"error: no response within {timeout}s", file=sys.stderr)
+            sys.exit(1)
+
+
+async def cmd_listen(address: str) -> None:
+    """Subscribe to the response characteristic and print every notification."""
+
+    def on_notify(_, data: bytearray) -> None:
+        print(data.decode("utf-8", errors="replace").strip(), flush=True)
+
+    print(f"Listening on {address} — Ctrl+C to stop", file=sys.stderr)
+    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+        await client.start_notify(RESP_UUID, on_notify)
+        try:
+            await asyncio.Future()  # run until cancelled
+        except asyncio.CancelledError:
+            pass
+
+
+async def cmd_scan() -> None:
+    """Discover nearby BLE peripherals."""
+    print("Scanning for 5 seconds…", file=sys.stderr)
+    devices = await BleakScanner.discover(timeout=5.0)
+    if not devices:
+        print("No devices found.")
+        return
+    for d in sorted(devices, key=lambda x: x.rssi or -999, reverse=True):
+        name = d.name or "(unknown)"
+        print(f"  {d.address}  {d.rssi:4d} dBm  {name}")
+
+
+def run(coro) -> None:
+    try:
+        asyncio.run(coro)
+    except BleakError as exc:
+        print(f"BLE error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        pass
+
+
+def do_send(args, command: str) -> None:
+    async def go():
+        resp = await send_and_receive(args.device, command, args.timeout)
+        print(resp)
+    run(go())
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="m5ctl",
+        description="Control the M5StickC NexStar clinometer over BLE.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  m5ctl tilt
+  m5ctl status
+  m5ctl set-time "2026-05-02T17:35:00Z"
+  m5ctl set-radec "12:34:56" "+07:08:09"
+  m5ctl set-altaz "+43.2" "181.7"
+  m5ctl show-msg 5 "Moving altitude axis"
+  m5ctl show-msg inf "Waiting for user"
+  m5ctl show-msg-wait 30 M5 "Press M5 when ready"
+  m5ctl cancel-msg
+  m5ctl stream 500         # enable streaming every 500 ms
+  m5ctl listen             # print all notifications (use after stream)
+  m5ctl scan               # discover nearby BLE devices
+        """,
+    )
+    parser.add_argument(
+        "-d", "--device",
+        default=DEFAULT_ADDRESS,
+        metavar="ADDR",
+        help=f"BLE address (default: {DEFAULT_ADDRESS})",
+    )
+    parser.add_argument(
+        "-t", "--timeout",
+        type=float,
+        default=5.0,
+        metavar="SEC",
+        help="seconds to wait for a response (default: 5)",
+    )
+
+    sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
+    sub.required = True
+
+    # --- simple query commands ---
+    sub.add_parser("ping",        help="Ping the device")
+    sub.add_parser("tilt",        help="Get current X/Y tilt angles")
+    sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
+    sub.add_parser("get-time",    help="Get current device time")
+    sub.add_parser("get-radec",   help="Get stored RA/Dec values")
+    sub.add_parser("get-altaz",   help="Get stored Alt/Az values")
+    sub.add_parser("get-msg",     help="Get current message state")
+    sub.add_parser("cancel-msg",  help="Cancel the active message immediately")
+    sub.add_parser("stop-stream", help="Disable tilt streaming")
+    sub.add_parser("listen",      help="Print all BLE notifications (Ctrl+C to stop)")
+    sub.add_parser("scan",        help="Scan for nearby BLE devices")
+
+    # --- parameterised commands ---
+    p = sub.add_parser("set-time",  help="Set device clock from UTC ISO-8601 string")
+    p.add_argument("time", help="e.g. 2026-05-02T17:35:00Z")
+
+    p = sub.add_parser("set-radec", help="Set RA/Dec display values")
+    p.add_argument("ra",  help="e.g. 12:34:56")
+    p.add_argument("dec", help="e.g. +07:08:09")
+
+    p = sub.add_parser("set-altaz", help="Set Alt/Az display values")
+    p.add_argument("alt", help="e.g. +43.2")
+    p.add_argument("az",  help="e.g. 181.7")
+
+    p = sub.add_parser("show-msg",
+                       help="Display a message (show-msg <seconds|inf> <text>)")
+    p.add_argument("duration", help="Display duration in seconds, or 'inf'")
+    p.add_argument("text",     help="Message text")
+
+    p = sub.add_parser("show-msg-wait",
+                       help="Display a message and watch for a button press "
+                            "(show-msg-wait <seconds|inf> <buttons> <text>)")
+    p.add_argument("duration", help="Display duration in seconds, or 'inf'")
+    p.add_argument("buttons",  help="Button mask: M5  A  B  M5,A  ANY")
+    p.add_argument("text",     help="Message text")
+
+    p = sub.add_parser("stream",
+                       help="Enable periodic tilt notifications (stream <period_ms>)")
+    p.add_argument("period_ms", type=int,
+                   help="Notification period in milliseconds (minimum 100)")
+
+    args = parser.parse_args()
+
+    match args.cmd:
+        case "ping":
+            do_send(args, "PING")
+        case "tilt":
+            do_send(args, "GET_TILT")
+        case "status":
+            do_send(args, "GET_STATUS")
+        case "get-time":
+            do_send(args, "GET_TIME")
+        case "get-radec":
+            do_send(args, "GET_RADEC")
+        case "get-altaz":
+            do_send(args, "GET_ALTAZ")
+        case "get-msg":
+            do_send(args, "GET_MSG")
+        case "cancel-msg":
+            do_send(args, "CANCEL_MSG")
+        case "stop-stream":
+            do_send(args, "STOP_STREAM")
+        case "set-time":
+            do_send(args, f"SET_TIME {args.time}")
+        case "set-radec":
+            do_send(args, f"SET_RADEC {args.ra} {args.dec}")
+        case "set-altaz":
+            do_send(args, f"SET_ALTAZ {args.alt} {args.az}")
+        case "show-msg":
+            dur = "INF" if args.duration.lower() == "inf" else args.duration
+            do_send(args, f"SHOW_MSG {dur} {args.text}")
+        case "show-msg-wait":
+            dur = "INF" if args.duration.lower() == "inf" else args.duration
+            do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {args.text}")
+        case "stream":
+            do_send(args, f"START_STREAM {args.period_ms}")
+        case "listen":
+            run(cmd_listen(args.device))
+        case "scan":
+            run(cmd_scan())
+
+
+if __name__ == "__main__":
+    main()
