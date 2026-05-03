@@ -1,14 +1,11 @@
 #include "ImuManager.h"
-#include <MPU6886.h>
+#include <M5StickCPlus2.h>
 #include <math.h>
-
-static MPU6886 s_imu;
 
 void ImuManager::begin() {
     _lastTheta    = 0.0f;
     _lastPhi      = 0.0f;
     _lastSampleMs = 0;
-    s_imu.Init();
 }
 
 void ImuManager::update(DeviceState& state) {
@@ -17,7 +14,7 @@ void ImuManager::update(DeviceState& state) {
     _lastSampleMs = now;
 
     float ax, ay, az;
-    s_imu.getAccelData(&ax, &ay, &az);
+    M5.Imu.getAccelData(&ax, &ay, &az);
 
     float rawTheta = 0.0f, rawPhi = 0.0f;
     if (ax > -1.0f && ax < 1.0f) {

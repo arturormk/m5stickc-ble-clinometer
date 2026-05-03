@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <M5StickCPlus2.h>
 #include "model/DeviceState.h"
 #include "imu/ImuManager.h"
 #include "ble/BleManager.h"
@@ -32,6 +33,7 @@ void setup() {
     memset(&g_state, 0, sizeof(g_state));
     g_state.screenIndex     = SCREEN_CLINOMETER;
     g_state.prevScreenIndex = SCREEN_CLINOMETER;
+    g_state.batteryLevel    = -1;
     strcpy(g_state.raText,  "--:--:--");
     strcpy(g_state.decText, "--:--:--");
     strcpy(g_state.altText, "---");
@@ -45,6 +47,7 @@ void setup() {
 }
 
 void loop() {
+    M5.update();
     g_imu.update(g_state);
     g_buttons.update(g_state, g_power);
     checkMessageExpiry(g_state);
@@ -52,6 +55,7 @@ void loop() {
     uint32_t now = millis();
     if ((now - s_lastBatMs) >= 5000) {
         g_state.batteryVoltage = g_power.readBatteryVoltage();
+        g_state.batteryLevel   = g_power.readBatteryLevel();
         s_lastBatMs = now;
     }
 

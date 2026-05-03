@@ -6,7 +6,8 @@
 #define SCREEN_TIME       1
 #define SCREEN_RADEC      2
 #define SCREEN_ALTAZ      3
-#define SCREEN_MESSAGE    4
+#define SCREEN_BATTERY    4
+#define SCREEN_MESSAGE    5
 
 // Button bitmask constants
 #define BTN_MASK_M5  0x01
@@ -20,6 +21,7 @@ struct DeviceState {
 
     bool     bleConnected;
     float    batteryVoltage;
+    int      batteryLevel;    // 0-100, or -1 if unknown
 
     float    tiltXDeg;
     float    tiltYDeg;

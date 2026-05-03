@@ -1,16 +1,13 @@
 #include "Buttons.h"
 
 void Buttons::begin() {
-    _btnM5.begin();
-    _btnTop.begin();
-    _btnPwr.begin();
     _topHeld         = false;
     _topPressStartMs = 0;
 }
 
 void Buttons::update(DeviceState& state, PowerManager& power) {
-    // --- M5 front button: cycle screens or send BLE button event ---
-    if (_btnM5.pressed()) {
+    // Front button (BtnA = GPIO 37): cycle screens or send BLE button event
+    if (M5.BtnA.wasPressed()) {
         if (state.messageActive && (state.messageAwaitButtons & BTN_MASK_M5)) {
             if (!state.pendingBleEventReady) {
                 strncpy((char*)state.pendingBleEvent, "EVENT BUTTON M5",
@@ -18,12 +15,12 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
                 state.pendingBleEventReady = true;
             }
         } else if (state.screenIndex != SCREEN_MESSAGE) {
-            state.screenIndex = (state.screenIndex + 1) % 4;
+            state.screenIndex = (state.screenIndex + 1) % 5;
         }
     }
 
-    // --- Top button: short press = reboot, long press = deep sleep ---
-    bool topDown = (_btnTop.read() == LOW);
+    // Side button (BtnB = GPIO 39): short press = reboot, long press = deep sleep
+    bool topDown = M5.BtnB.isPressed();
     if (topDown) {
         if (!_topHeld) {
             _topHeld         = true;
@@ -39,6 +36,4 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
             }
         }
     }
-
-    // --- Power button: reserved, no action in v1 ---
 }

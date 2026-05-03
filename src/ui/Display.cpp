@@ -2,55 +2,15 @@
 #include <math.h>
 #include <time.h>
 
-// --- CLite_GFX: exact hardware config from demo ---
-
-CLite_GFX::CLite_GFX() {
-    {
-        auto cfg = _bus_instance.config();
-        cfg.pin_mosi  = 15;
-        cfg.pin_miso  = -1;
-        cfg.pin_sclk  = 13;
-        cfg.pin_dc    = 14;
-        cfg.freq_write = 40000000;
-        _bus_instance.config(cfg);
-        _panel_instance.setBus(&_bus_instance);
-    }
-    {
-        auto cfg = _panel_instance.config();
-        cfg.invert       = true;
-        cfg.pin_cs       = 5;
-        cfg.pin_rst      = 12;
-        cfg.pin_busy     = -1;
-        cfg.panel_width  = 135;
-        cfg.panel_height = 240;
-        cfg.offset_x     = 52;
-        cfg.offset_y     = 40;
-        _panel_instance.config(cfg);
-    }
-    {
-        auto cfg = _light_instance.config();
-        cfg.pin_bl      = 27;
-        cfg.invert      = false;
-        cfg.freq        = 200;
-        cfg.pwm_channel = 7;
-        _light_instance.config(cfg);
-        _panel_instance.setLight(&_light_instance);
-    }
-    setPanel(&_panel_instance);
-}
-
-// --- Display ---
-
 void Display::begin() {
-    _lcd.begin();
-    _lcd.setRotation(3);   // landscape: 240 wide × 135 tall
-    _lcd.setBrightness(128);
-    _sprite = new LGFX_Sprite(&_lcd);
-    _sprite->createSprite(_lcd.width(), _lcd.height());
+    M5.Display.setRotation(3);   // landscape: 240 wide × 135 tall
+    M5.Display.setBrightness(128);
+    _sprite = new LGFX_Sprite(&M5.Display);
+    _sprite->createSprite(M5.Display.width(), M5.Display.height());
 }
 
 void Display::setBrightness(uint8_t val) {
-    _lcd.setBrightness(val);
+    M5.Display.setBrightness(val);
 }
 
 void Display::update(const DeviceState& state) {
@@ -67,6 +27,7 @@ void Display::update(const DeviceState& state) {
         case SCREEN_TIME:       _drawTime(state);       break;
         case SCREEN_RADEC:      _drawRADec(state);      break;
         case SCREEN_ALTAZ:      _drawAltAz(state);      break;
+        case SCREEN_BATTERY:    _drawBattery(state);    break;
         case SCREEN_MESSAGE:    _drawMessage(state);    break;
         default: break;
     }
@@ -281,6 +242,60 @@ void Display::_drawMessage(const DeviceState& state) {
         _sprite->drawString(hint, 120, 133);
         _sprite->setTextDatum(textdatum_t::top_left);
     }
+}
+
+void Display::_drawBattery(const DeviceState& state) {
+    int pct = state.batteryLevel;
+
+    // Title
+    _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextDatum(textdatum_t::top_center);
+    _sprite->drawString("BATTERY", 110, 8);
+    _sprite->setTextDatum(textdatum_t::top_left);
+
+    // Bar geometry
+    const int BAR_X = 18, BAR_Y = 36, BAR_W = 192, BAR_H = 28;
+    const int TIP_W = 7,  TIP_H = 14;
+
+    // Battery body outline
+    _sprite->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, TFT_DARKGREY);
+    // Positive terminal nub on the right
+    _sprite->fillRect(BAR_X + BAR_W, BAR_Y + (BAR_H - TIP_H) / 2, TIP_W, TIP_H, TFT_DARKGREY);
+
+    // Fill colour based on level
+    uint16_t fillColor;
+    if      (pct < 0)   fillColor = TFT_DARKGREY;
+    else if (pct <= 20) fillColor = TFT_RED;
+    else if (pct <= 50) fillColor = TFT_YELLOW;
+    else                fillColor = TFT_GREEN;
+
+    int fillW = (pct >= 0) ? (int)((float)pct / 100.0f * (BAR_W - 4)) : 0;
+    if (fillW > 0) {
+        _sprite->fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, fillColor);
+    }
+
+    // Voltage
+    _sprite->setFont(&fonts::Font4);
+    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextDatum(textdatum_t::middle_center);
+    if (state.batteryVoltage > 0.5f) {
+        char voltBuf[12];
+        snprintf(voltBuf, sizeof(voltBuf), "%.2f V", state.batteryVoltage);
+        _sprite->drawString(voltBuf, 90, 92);
+    } else {
+        _sprite->drawString("-- V", 90, 92);
+    }
+
+    // Percentage
+    if (pct >= 0) {
+        char pctBuf[8];
+        snprintf(pctBuf, sizeof(pctBuf), "%d%%", pct);
+        _sprite->drawString(pctBuf, 185, 92);
+    } else {
+        _sprite->drawString("--%", 185, 92);
+    }
+    _sprite->setTextDatum(textdatum_t::top_left);
 }
 
 void Display::_drawBleIndicator(bool connected) {
