@@ -1,6 +1,6 @@
-# M5StickC Bluetooth Clinometer
+# M5StickC Plus 2 Bluetooth Clinometer
 
-A BLE-enabled clinometer and telescope status display for the M5StickC (ESP32). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
+A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (ESP32). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
 
 ![Bubble Level](docs/images/clinometer_bubble.jpg)
 
@@ -21,11 +21,11 @@ A BLE-enabled clinometer and telescope status display for the M5StickC (ESP32). 
 
 | Item | Detail |
 |---|---|
-| Device | M5StickC |
+| Device | M5StickC Plus 2 |
 | MCU | ESP32 |
 | Display | ST7789 135×240 LCD (landscape: 240×135) |
 | IMU | MPU6886 6-axis accelerometer/gyroscope |
-| PMIC | AXP192 (battery management) |
+| PMIC | AXP2101 (battery management) |
 | Communication | Bluetooth Low Energy (BLE 4.2) |
 
 ## Building
@@ -43,7 +43,7 @@ This is a [PlatformIO](https://platformio.org/) project targeting the Arduino fr
 ~/.platformio/penv/bin/pio run -t upload --upload-port /dev/ttyUSB0
 ```
 
-Requires PlatformIO with the `espressif32@6.1.0` platform installed. The `m5stack/M5GFX@0.1.16` library is fetched automatically on first build.
+Requires PlatformIO with the `espressif32@6.1.0` platform installed. The `m5stack/M5StickCPlus2` library (and its dependencies: M5Unified, M5GFX) is fetched automatically on first build.
 
 ## Screens
 
@@ -55,6 +55,7 @@ The **M5 front button** cycles through screens in order:
 | 1 | Time | Current UTC time (HH:MM:SS) and date set by the Pi |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
+| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
 
 ## Button behaviour
@@ -137,10 +138,10 @@ Returns a one-line summary of device state.
 
 | Field | Values | Description |
 |---|---|---|
-| `SCREEN` | `CLINOMETER` `TIME` `RADEC` `ALTAZ` `MESSAGE` | Active screen |
+| `SCREEN` | `CLINOMETER` `TIME` `RADEC` `ALTAZ` `BATTERY` `MESSAGE` | Active screen |
 | `BLE` | `0` `1` | BLE connected flag |
 | `STREAM` | `0` `1` | Tilt streaming enabled |
-| `BAT` | float volts | Battery voltage (AXP192 ADC) |
+| `BAT` | float volts | Battery voltage (AXP2101) |
 
 ---
 
@@ -372,9 +373,6 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 
 ```
 ├── platformio.ini         Build configuration (espressif32@6.1.0, m5stick-c)
-├── lib/
-│   ├── Button/            Debounced button library (from M5StickC demo)
-│   └── mpu6886/           MPU6886 + Mahony AHRS driver (from M5StickC demo)
 ├── src/
 │   ├── main.cpp           Arduino setup/loop — orchestrates all subsystems
 │   ├── model/
@@ -387,9 +385,9 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 │   │   └── BleManager.cpp GATT server, command parser, response/event notify
 │   ├── ui/
 │   │   ├── Display.h
-│   │   └── Display.cpp    CLite_GFX hardware config + all five screen renderers
+│   │   └── Display.cpp    All six screen renderers (sprite-buffered via M5GFX)
 │   └── system/
-│       ├── PowerManager.h/.cpp  Wire1 init, AXP192 battery + power-off
+│       ├── PowerManager.h/.cpp  M5StickCPlus2 init, battery voltage/level, power-off
 │       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
@@ -398,6 +396,7 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 ## Architecture notes
 
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
-- BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps `Wire1` (used by IMU and AXP192) exclusively on the main loop task.
+- BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
+- Hardware is initialised through `M5StickCPlus2.h` / M5Unified; the display uses M5GFX sprite double-buffering for flicker-free rendering.
 - All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick.
-- Flash usage: ~37% of 3 MB. RAM usage: ~13% of 320 KB.
+- Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.
