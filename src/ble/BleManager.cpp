@@ -21,6 +21,7 @@ static const char* screenName(int idx) {
         case SCREEN_TIME:       return "TIME";
         case SCREEN_RADEC:      return "RADEC";
         case SCREEN_ALTAZ:      return "ALTAZ";
+        case SCREEN_BATTERY:    return "BATTERY";
         case SCREEN_MESSAGE:    return "MESSAGE";
         default:                return "UNKNOWN";
     }
@@ -373,6 +374,16 @@ void BleManager::update(DeviceState& state) {
     if (state.pendingBleEventReady) {
         sendEvent((const char*)state.pendingBleEvent);
         state.pendingBleEventReady = false;
+    }
+
+    // Notify on screen change
+    if (state.screenIndex != _lastScreenIndex) {
+        _lastScreenIndex = state.screenIndex;
+        if (state.bleConnected) {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "EVENT SCREEN %s", screenName(state.screenIndex));
+            sendEvent(buf);
+        }
     }
 
     // Optional tilt streaming

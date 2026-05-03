@@ -26,6 +26,7 @@ private:
 
     bool     _wasConnected   = false;
     uint32_t _lastStatusMs   = 0;
+    int      _lastScreenIndex = -1;
 
     void _updateStatusChar(const DeviceState& state);
 };

@@ -98,7 +98,7 @@ The device advertises continuously. After a central disconnects, advertising res
 
 Commands and responses are **ASCII text**, one per write/notify. Fields are space-separated. A trailing newline is accepted but not required.
 
-Subscribe to notifications on the **Response** characteristic to receive replies and asynchronous button events. The device sends one notify per command reply.
+Subscribe to notifications on the **Response** characteristic to receive replies and asynchronous events (button presses, screen changes). The device sends one notify per command reply.
 
 ---
 
@@ -348,6 +348,19 @@ Night mode persists until explicitly disabled or the device reboots. The current
 ## Asynchronous Events
 
 The device can send unsolicited notifications on the Response characteristic. Subscribe to notifications to receive them.
+
+### Screen change events
+
+Sent whenever the active screen changes (button press, message activation/expiry, or BLE command). Clients can use this to pause or resume periodic `SET_RADEC` / `SET_ALTAZ` updates when those screens are not visible.
+
+```
+EVENT SCREEN CLINOMETER
+EVENT SCREEN TIME
+EVENT SCREEN RADEC
+EVENT SCREEN ALTAZ
+EVENT SCREEN BATTERY
+EVENT SCREEN MESSAGE
+```
 
 ### Button events
 
