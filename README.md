@@ -2,6 +2,14 @@
 
 A BLE-enabled clinometer and telescope status display for the M5StickC (ESP32). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
 
+![Bubble Level](docs/images/clinometer_bubble.jpg)
+
+![UTC](docs/images/clinometer_utc.jpg)
+
+![RA Dec](docs/images/clinometer_radec.jpg)
+
+![Alt Az](docs/images/clinometer_altaz.jpg)
+
 ## What it does
 
 - Shows a live **bubble level** (clinometer) based on the built-in IMU — used to level the telescope mount
