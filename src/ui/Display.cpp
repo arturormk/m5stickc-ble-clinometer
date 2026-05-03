@@ -32,7 +32,7 @@ void Display::update(const DeviceState& state) {
         default: break;
     }
 
-    _drawBleIndicator(state.bleConnected);
+    _drawBleIndicator(state.bleConnected, state.nightMode);
     _flush();
 }
 
@@ -43,14 +43,16 @@ static constexpr int CY = 67;   // bubble level center Y
 static constexpr int MAX_R = 55; // pixel radius for 3°
 
 void Display::_drawClinometer(const DeviceState& state) {
+    bool n = state.nightMode;
+
     // Crosshairs
-    _sprite->drawLine(CX, CY - MAX_R, CX, CY + MAX_R, TFT_DARKGREY);
-    _sprite->drawLine(CX - MAX_R, CY, CX + MAX_R, CY, TFT_DARKGREY);
+    _sprite->drawLine(CX, CY - MAX_R, CX, CY + MAX_R, _c(TFT_DARKGREY, n));
+    _sprite->drawLine(CX - MAX_R, CY, CX + MAX_R, CY, _c(TFT_DARKGREY, n));
 
     // Concentric circles for 1°, 2°, 3°
     for (int deg = 1; deg <= 3; deg++) {
         int r = deg * MAX_R / 3;
-        uint16_t col = (deg == 1) ? TFT_GREEN : (deg == 2) ? TFT_YELLOW : TFT_RED;
+        uint16_t col = (deg == 1) ? _c(TFT_GREEN, n) : (deg == 2) ? _c(TFT_YELLOW, n) : _c(TFT_RED, n);
         _sprite->drawCircle(CX, CY, r, col);
     }
 
@@ -59,12 +61,12 @@ void Display::_drawClinometer(const DeviceState& state) {
     int by = CY - (int)(state.tiltXDeg * MAX_R / 3.0f);
     bx = constrain(bx, CX - MAX_R, CX + MAX_R);
     by = constrain(by, CY - MAX_R, CY + MAX_R);
-    _sprite->fillCircle(bx, by, 6, TFT_WHITE);
-    _sprite->drawCircle(bx, by, 6, TFT_YELLOW);
+    _sprite->fillCircle(bx, by, 6, _c(TFT_WHITE, n));
+    _sprite->drawCircle(bx, by, 6, _c(TFT_YELLOW, n));
 
     // Numeric readout — right panel
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(155, 8);
     _sprite->print("X:");
     _sprite->setCursor(155, 22);
@@ -80,16 +82,17 @@ void Display::_drawClinometer(const DeviceState& state) {
 
     // Degree symbol area label
     _sprite->setFont(&fonts::Font0);
-    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setCursor(155, 118);
     _sprite->print("degrees");
 }
 
 void Display::_drawTime(const DeviceState& state) {
+    bool n = state.nightMode;
     time_t t = deviceCurrentTime(state);
     if (t == 0) {
         _sprite->setFont(&fonts::Font4);
-        _sprite->setTextColor(TFT_DARKGREY);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
         _sprite->setTextDatum(textdatum_t::middle_center);
         _sprite->drawString("NO TIME SET", 120, 67);
         _sprite->setTextDatum(textdatum_t::top_left);
@@ -104,7 +107,7 @@ void Display::_drawTime(const DeviceState& state) {
     snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d",
              ti.tm_hour, ti.tm_min, ti.tm_sec);
     _sprite->setFont(&fonts::Font7);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setTextDatum(textdatum_t::middle_center);
     _sprite->drawString(timeBuf, 120, 50);
 
@@ -113,57 +116,60 @@ void Display::_drawTime(const DeviceState& state) {
     snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
              ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_LIGHTGREY);
+    _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
     _sprite->drawString(dateBuf, 120, 105);
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 
 void Display::_drawRADec(const DeviceState& state) {
-    _sprite->setTextColor(TFT_DARKGREY);
+    bool n = state.nightMode;
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setFont(&fonts::Font2);
     _sprite->setCursor(10, 10);
     _sprite->print("RA");
 
     _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(10, 28);
     _sprite->print(state.raText);
 
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setCursor(10, 72);
     _sprite->print("Dec");
 
     _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(10, 90);
     _sprite->print(state.decText);
 }
 
 void Display::_drawAltAz(const DeviceState& state) {
+    bool n = state.nightMode;
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setCursor(10, 10);
     _sprite->print("Alt");
 
     _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(10, 28);
     _sprite->print(state.altText);
 
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setCursor(10, 72);
     _sprite->print("Az");
 
     _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(10, 90);
     _sprite->print(state.azText);
 }
 
 void Display::_drawMessage(const DeviceState& state) {
     if (!state.messageActive) return;
+    bool n = state.nightMode;
 
     // Countdown top-right (if timed)
     if (!state.messagePersistent && state.messageExpiresAtMs > 0) {
@@ -175,7 +181,7 @@ void Display::_drawMessage(const DeviceState& state) {
         char countdown[8];
         snprintf(countdown, sizeof(countdown), "%ds", remaining);
         _sprite->setFont(&fonts::Font2);
-        _sprite->setTextColor(TFT_YELLOW);
+        _sprite->setTextColor(_c(TFT_YELLOW, n));
         _sprite->setTextDatum(textdatum_t::top_right);
         _sprite->drawString(countdown, 210, 4);
         _sprite->setTextDatum(textdatum_t::top_left);
@@ -187,7 +193,7 @@ void Display::_drawMessage(const DeviceState& state) {
     int startY = 20;
 
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
 
     const char* p = state.messageText;
     int len = strlen(p);
@@ -237,7 +243,7 @@ void Display::_drawMessage(const DeviceState& state) {
         }
         strcat(hint, " ]");
         _sprite->setFont(&fonts::Font2);
-        _sprite->setTextColor(TFT_DARKGREY);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
         _sprite->setTextDatum(textdatum_t::bottom_center);
         _sprite->drawString(hint, 120, 133);
         _sprite->setTextDatum(textdatum_t::top_left);
@@ -245,11 +251,12 @@ void Display::_drawMessage(const DeviceState& state) {
 }
 
 void Display::_drawBattery(const DeviceState& state) {
+    bool n = state.nightMode;
     int pct = state.batteryLevel;
 
     // Title
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(TFT_DARKGREY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setTextDatum(textdatum_t::top_center);
     _sprite->drawString("BATTERY", 110, 8);
     _sprite->setTextDatum(textdatum_t::top_left);
@@ -259,16 +266,16 @@ void Display::_drawBattery(const DeviceState& state) {
     const int TIP_W = 7,  TIP_H = 14;
 
     // Battery body outline
-    _sprite->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, TFT_DARKGREY);
+    _sprite->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, _c(TFT_DARKGREY, n));
     // Positive terminal nub on the right
-    _sprite->fillRect(BAR_X + BAR_W, BAR_Y + (BAR_H - TIP_H) / 2, TIP_W, TIP_H, TFT_DARKGREY);
+    _sprite->fillRect(BAR_X + BAR_W, BAR_Y + (BAR_H - TIP_H) / 2, TIP_W, TIP_H, _c(TFT_DARKGREY, n));
 
     // Fill colour based on level
     uint16_t fillColor;
-    if      (pct < 0)   fillColor = TFT_DARKGREY;
-    else if (pct <= 20) fillColor = TFT_RED;
-    else if (pct <= 50) fillColor = TFT_YELLOW;
-    else                fillColor = TFT_GREEN;
+    if      (pct < 0)   fillColor = _c(TFT_DARKGREY, n);
+    else if (pct <= 20) fillColor = _c(TFT_RED, n);
+    else if (pct <= 50) fillColor = _c(TFT_YELLOW, n);
+    else                fillColor = _c(TFT_GREEN, n);
 
     int fillW = (pct >= 0) ? (int)((float)pct / 100.0f * (BAR_W - 4)) : 0;
     if (fillW > 0) {
@@ -277,7 +284,7 @@ void Display::_drawBattery(const DeviceState& state) {
 
     // Voltage
     _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(TFT_WHITE);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setTextDatum(textdatum_t::middle_center);
     if (state.batteryVoltage > 0.5f) {
         char voltBuf[12];
@@ -298,11 +305,17 @@ void Display::_drawBattery(const DeviceState& state) {
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 
-void Display::_drawBleIndicator(bool connected) {
-    uint16_t col = connected ? TFT_GREEN : 0x4208; // dark gray when not connected
+void Display::_drawBleIndicator(bool connected, bool nightMode) {
+    uint16_t col = connected ? _c(TFT_GREEN, nightMode) : _c(0x4208, nightMode);
     _sprite->fillCircle(228, 8, 5, col);
 }
 
 void Display::_flush() {
     _sprite->pushSprite(0, 0);
+}
+
+uint16_t Display::_c(uint16_t color, bool night) const {
+    if (!night || color == TFT_BLACK) return color;
+    if (color == TFT_GREEN) return 0xFB00u; // warm orange-red accent in RGB565
+    return TFT_RED;
 }

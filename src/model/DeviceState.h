@@ -39,6 +39,8 @@ struct DeviceState {
     uint32_t streamPeriodMs;
     uint32_t lastStreamMs;
 
+    bool     nightMode;
+
     bool     messageActive;
     char     messageText[128];
     uint32_t messageExpiresAtMs;  // 0 = persistent

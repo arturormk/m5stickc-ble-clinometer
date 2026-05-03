@@ -94,6 +94,8 @@ examples:
   m5ctl show-msg-wait 30 M5 "Press M5 when ready"
   m5ctl cancel-msg
   m5ctl stream 500         # enable streaming every 500 ms
+  m5ctl night-mode on      # enable red-only night mode
+  m5ctl night-mode off     # restore normal colors
   m5ctl listen             # print all notifications (use after stream)
   m5ctl scan               # discover nearby BLE devices
         """,
@@ -157,6 +159,9 @@ examples:
     p.add_argument("period_ms", type=int,
                    help="Notification period in milliseconds (minimum 100)")
 
+    p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
+    p.add_argument("state", choices=["on", "off"], help="on or off")
+
     args = parser.parse_args()
 
     match args.cmd:
@@ -192,6 +197,8 @@ examples:
             do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {args.text}")
         case "stream":
             do_send(args, f"START_STREAM {args.period_ms}")
+        case "night-mode":
+            do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
         case "listen":
             run(cmd_listen(args.device))
         case "scan":

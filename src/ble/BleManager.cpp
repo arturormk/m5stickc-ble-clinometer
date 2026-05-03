@@ -73,11 +73,12 @@ static void formatIso8601(time_t t, char* buf, size_t len) {
 
 // Assemble the STATUS response line
 static void buildStatusLine(const DeviceState& state, char* buf, size_t len) {
-    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f",
+    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d",
              screenName(state.screenIndex),
              state.bleConnected ? 1 : 0,
              state.streamEnabled ? 1 : 0,
-             state.batteryVoltage);
+             state.batteryVoltage,
+             state.nightMode ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +285,19 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "STOP_STREAM") == 0) {
             s_state->streamEnabled = false;
             strncpy(resp, "OK STREAM 0", sizeof(resp) - 1);
+
+        } else if (strcasecmp(tok, "SET_NIGHT_MODE") == 0) {
+            char* val = strtok_r(nullptr, " ", &saveptr);
+            if (!val) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            if (strcasecmp(val, "ON") == 0) {
+                s_state->nightMode = true;
+                strncpy(resp, "OK NIGHT_MODE ON", sizeof(resp) - 1);
+            } else if (strcasecmp(val, "OFF") == 0) {
+                s_state->nightMode = false;
+                strncpy(resp, "OK NIGHT_MODE OFF", sizeof(resp) - 1);
+            } else {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+            }
 
         } else {
             strncpy(resp, "ERR UNKNOWN_COMMAND", sizeof(resp) - 1);

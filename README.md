@@ -16,6 +16,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Displays **time**, **RA/Dec**, and **Alt/Az** coordinates pushed from the Raspberry Pi over BLE
 - Exposes a **BLE GATT service** so a Raspberry Pi can query tilt angles and update the displayed data at any time, regardless of which screen is active
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
+- Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 
 ## Hardware
 
@@ -133,7 +134,7 @@ Returns a one-line summary of device state.
 
 ```
 → GET_STATUS
-← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96
+← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96 NIGHT=0
 ```
 
 | Field | Values | Description |
@@ -142,6 +143,7 @@ Returns a one-line summary of device state.
 | `BLE` | `0` `1` | BLE connected flag |
 | `STREAM` | `0` `1` | Tilt streaming enabled |
 | `BAT` | float volts | Battery voltage (AXP2101) |
+| `NIGHT` | `0` `1` | Night mode enabled |
 
 ---
 
@@ -325,6 +327,24 @@ Disables tilt streaming.
 
 ---
 
+### `SET_NIGHT_MODE <on|off>`
+
+Switches the display into night mode (or back to normal). In night mode all display colours are shifted to the red family to preserve dark-adapted vision at the telescope eyepiece. Elements that were previously green (1° clinometer ring, battery-good fill, BLE-connected indicator) are rendered in a warm orange-red to retain visual hierarchy; all other non-black colours use pure red.
+
+```
+→ SET_NIGHT_MODE ON
+← OK NIGHT_MODE ON
+
+→ SET_NIGHT_MODE OFF
+← OK NIGHT_MODE OFF
+
+← ERR BAD_ARGS   (if argument is missing or not ON/OFF)
+```
+
+Night mode persists until explicitly disabled or the device reboots. The current state is reported by `GET_STATUS` as `NIGHT=1` / `NIGHT=0`.
+
+---
+
 ## Asynchronous Events
 
 The device can send unsolicited notifications on the Response characteristic. Subscribe to notifications to receive them.
@@ -369,6 +389,54 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 
 ---
 
+## tools/m5ctl
+
+`tools/m5ctl` is a Python 3 command-line client for the BLE interface. It requires the [`bleak`](https://bleak.readthedocs.io/) library (`pip install bleak`).
+
+```
+usage: m5ctl [-h] [-d ADDR] [-t SEC] COMMAND ...
+
+options:
+  -d ADDR   BLE address (default: F0:24:F9:9B:E2:52)
+  -t SEC    seconds to wait for a response (default: 5)
+```
+
+| Command | Arguments | Description |
+|---|---|---|
+| `ping` | | Ping the device |
+| `tilt` | | Get current X/Y tilt angles |
+| `status` | | Get device status (screen, BLE, battery, stream, night mode) |
+| `get-time` | | Get current device time |
+| `get-radec` | | Get stored RA/Dec values |
+| `get-altaz` | | Get stored Alt/Az values |
+| `get-msg` | | Get current message state |
+| `set-time` | `<iso8601>` | Set device clock from UTC ISO-8601 string |
+| `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
+| `set-altaz` | `<alt> <az>` | Set Alt/Az display values |
+| `show-msg` | `<seconds\|inf> <text>` | Display a timed or persistent message |
+| `show-msg-wait` | `<seconds\|inf> <buttons> <text>` | Display a message and watch for a button press |
+| `cancel-msg` | | Cancel the active message immediately |
+| `stream` | `<period_ms>` | Enable periodic tilt notifications |
+| `stop-stream` | | Disable tilt streaming |
+| `night-mode` | `on\|off` | Enable or disable red-only night mode |
+| `listen` | | Print all BLE notifications (Ctrl+C to stop) |
+| `scan` | | Scan for nearby BLE devices |
+
+Examples:
+
+```bash
+m5ctl tilt
+m5ctl status
+m5ctl set-time "2026-05-04T21:00:00Z"
+m5ctl set-radec "12:34:56" "+07:08:09"
+m5ctl night-mode on
+m5ctl night-mode off
+m5ctl stream 500
+m5ctl listen
+```
+
+---
+
 ## Project structure
 
 ```
@@ -389,6 +457,8 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 │   └── system/
 │       ├── PowerManager.h/.cpp  M5StickCPlus2 init, battery voltage/level, power-off
 │       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
+├── tools/
+│   └── m5ctl              Python 3 BLE command-line client (requires bleak)
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
 ```
