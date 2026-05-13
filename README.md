@@ -347,6 +347,60 @@ Night mode persists until explicitly disabled or the device reboots. The current
 
 ---
 
+### `BEEP [note ...]`
+
+Plays a beep or a melody through the built-in speaker. The response is returned immediately while the melody plays asynchronously.
+
+```
+→ BEEP
+← OK BEEP
+
+→ BEEP C'4 G8 -16 G8 A4 G8 -2 B4 C'4
+← OK BEEP
+
+← ERR BAD_MELODY   (unrecognised note token)
+```
+
+With no arguments the device emits a single short attention beep (880 Hz, 200 ms). With note tokens it plays the sequence as a melody.
+
+**Note token format:** `<letter>[accidental][octave][duration][dot]`
+
+Each token is a space-separated note or rest:
+
+| Part | Syntax | Meaning |
+|---|---|---|
+| Letter | `A` `B` `C` `D` `E` `F` `G` | Note name (case-insensitive) |
+| Rest | `-` | Silence for the given duration |
+| Sharp / flat | `#` or `b` after letter | Raise or lower by one semitone |
+| Octave up | `'` (one or more) after accidental | Each `'` raises the note by one octave |
+| Octave down | `,` (one or more) after accidental | Each `,` lowers the note by one octave |
+| Duration | `1` `2` `4` `8` `16` | Whole, half, quarter, eighth, sixteenth; default `4` |
+| Dotted | `.` after duration | Multiplies duration by 1.5 |
+
+Bare letter names (no `'` or `,`) are in the middle register. A single `'` shifts up one octave from there; a single `,` shifts down one octave. Multiple marks stack: `C''` is two octaves above the middle C, `C,,` is two below.
+
+**Examples:**
+
+| Token | Meaning |
+|---|---|
+| `C` | Middle C, quarter note |
+| `C'` | One octave above middle C, quarter note |
+| `C,` | One octave below middle C, quarter note |
+| `G#8` | G sharp, eighth note |
+| `Bb2` | B flat, half note |
+| `C4.` | Dotted quarter (1.5× duration) |
+| `-4` | Quarter-note rest |
+
+"Shave And A Hair Cut":
+
+```
+BEEP C'4 G8 -16 G8 A4 G8 -2 B4 C'4
+```
+
+Up to 32 notes per command.
+
+---
+
 ## Asynchronous Events
 
 The device can send unsolicited notifications on the Response characteristic. Subscribe to notifications to receive them.
@@ -391,6 +445,7 @@ TILT +0.38 -1.12
 | `ERR UNKNOWN_COMMAND` | Command token not recognised |
 | `ERR BAD_ARGS` | Wrong number or format of arguments |
 | `ERR BAD_TIME` | `SET_TIME` value could not be parsed |
+| `ERR BAD_MELODY` | `BEEP` received an unrecognised note token |
 
 ---
 
@@ -443,6 +498,7 @@ options:
 | `stream` | `<period_ms>` | Enable periodic tilt notifications |
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
+| `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
 | `listen` | | Print all BLE notifications (Ctrl+C to stop) |
 | `scan` | | Scan for nearby BLE devices |
 
@@ -454,6 +510,8 @@ uv run tools/m5ctl status
 uv run tools/m5ctl set-time "2026-05-04T21:00:00Z"
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
+uv run tools/m5ctl beep
+uv run tools/m5ctl beep C'4 G8 -16 G8 A4 G8 -2 B4 C'4
 uv run tools/m5ctl stream 500
 uv run tools/m5ctl listen
 ```

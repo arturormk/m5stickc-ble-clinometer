@@ -83,6 +83,60 @@ static void buildStatusLine(const DeviceState& state, char* buf, size_t len) {
 }
 
 // ---------------------------------------------------------------------------
+// BEEP / melody helpers
+// ---------------------------------------------------------------------------
+
+static uint16_t noteFreq(int semitone, int octave) {
+    int total = semitone + (octave - 4) * 12;
+    return (uint16_t)(261.63f * powf(2.0f, total / 12.0f) + 0.5f);
+}
+
+static int parseMelody(const char* str, MelodyNote* notes, int maxNotes) {
+    char buf[256];
+    strncpy(buf, str, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    char* sp  = nullptr;
+    char* tok = strtok_r(buf, " ", &sp);
+    int count = 0;
+    while (tok && count < maxNotes) {
+        const char* p = tok;
+        bool isRest   = (*p == '-');
+        int semi = 0, octave = 5;
+        if (!isRest) {
+            switch (toupper((unsigned char)*p++)) {
+                case 'C': semi =  0; break;
+                case 'D': semi =  2; break;
+                case 'E': semi =  4; break;
+                case 'F': semi =  5; break;
+                case 'G': semi =  7; break;
+                case 'A': semi =  9; break;
+                case 'B': semi = 11; break;
+                default:  return 0;
+            }
+            if (*p == '#') { semi++; p++; }
+            else if (*p == 'b') { semi--; p++; }
+        } else {
+            p++;
+        }
+        while (*p == '\'') { octave++; p++; }
+        while (*p == ',')  { octave--; p++; }
+        int div = 4;
+        if (isdigit((unsigned char)*p)) {
+            div = 0;
+            while (isdigit((unsigned char)*p)) div = div * 10 + (*p++ - '0');
+        }
+        if (div <= 0) div = 4;
+        uint32_t dur = (4u * 250u) / (uint32_t)div;  // 120 BPM, quarter = 500ms
+        if (*p == '.') dur = dur * 3 / 2;
+        notes[count].freqHz = isRest ? 0 : noteFreq(semi, octave);
+        notes[count].durMs  = (uint16_t)(dur > 65535u ? 65535u : dur);
+        count++;
+        tok = strtok_r(nullptr, " ", &sp);
+    }
+    return count;
+}
+
+// ---------------------------------------------------------------------------
 // Server callbacks
 // ---------------------------------------------------------------------------
 
@@ -306,6 +360,20 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             } else {
                 strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
             }
+
+        } else if (strcasecmp(tok, "BEEP") == 0) {
+            char* arg = strtok_r(nullptr, "", &saveptr);
+            while (arg && *arg == ' ') arg++;
+            if (!arg || *arg == '\0') {
+                s_state->melodyNotes[0] = {880, 200};
+                s_state->melodyPendingLength = 1;
+            } else {
+                int n = parseMelody(arg, (MelodyNote*)s_state->melodyNotes, MELODY_MAX_NOTES);
+                if (n <= 0) { strncpy(resp, "ERR BAD_MELODY", sizeof(resp) - 1); goto respond; }
+                s_state->melodyPendingLength = n;
+            }
+            s_state->melodyPending = true;
+            strncpy(resp, "OK BEEP", sizeof(resp) - 1);
 
         } else {
             strncpy(resp, "ERR UNKNOWN_COMMAND", sizeof(resp) - 1);

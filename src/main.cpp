@@ -17,6 +17,29 @@ PowerManager g_power;
 
 static uint32_t s_lastBatMs = 0;
 
+static void tickMelody(DeviceState& state) {
+    if (state.melodyPending) {
+        state.melodyLength      = state.melodyPendingLength;
+        state.melodyNoteIdx     = 0;
+        state.melodyNoteUntilMs = 0;
+        state.melodyPending     = false;
+        M5.Speaker.setVolume(180);
+    }
+    if (state.melodyLength == 0) return;
+    uint32_t now = millis();
+    if (now < state.melodyNoteUntilMs) return;
+    if (state.melodyNoteIdx >= state.melodyLength) {
+        state.melodyLength = 0;
+        return;
+    }
+    MelodyNote& n = state.melodyNotes[state.melodyNoteIdx++];
+    state.melodyNoteUntilMs = now + n.durMs;
+    if (n.freqHz == 0)
+        M5.Speaker.stop();
+    else
+        M5.Speaker.tone((float)n.freqHz, n.durMs);
+}
+
 static void checkMessageExpiry(DeviceState& state) {
     if (!state.messageActive) return;
     if (state.messagePersistent) return;
@@ -51,6 +74,7 @@ void loop() {
     g_imu.update(g_state);
     g_buttons.update(g_state, g_power);
     checkMessageExpiry(g_state);
+    tickMelody(g_state);
 
     uint32_t now = millis();
     if ((now - s_lastBatMs) >= 5000) {

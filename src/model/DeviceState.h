@@ -2,6 +2,13 @@
 #include <Arduino.h>
 #include <time.h>
 
+#define MELODY_MAX_NOTES 32
+
+struct MelodyNote {
+    uint16_t freqHz;  // 0 = rest
+    uint16_t durMs;
+};
+
 #define SCREEN_CLINOMETER 0
 #define SCREEN_TIME       1
 #define SCREEN_RADEC      2
@@ -40,6 +47,13 @@ struct DeviceState {
     uint32_t lastStreamMs;
 
     bool     nightMode;
+
+    MelodyNote       melodyNotes[MELODY_MAX_NOTES];
+    volatile int     melodyPendingLength;
+    volatile bool    melodyPending;
+    int              melodyLength;
+    int              melodyNoteIdx;
+    uint32_t         melodyNoteUntilMs;
 
     bool     messageActive;
     char     messageText[128];

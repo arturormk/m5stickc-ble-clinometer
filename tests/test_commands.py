@@ -347,6 +347,32 @@ async def test_night_mode_bad_arg(device_addr):
 
 
 # ---------------------------------------------------------------------------
+# BEEP
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_beep_no_args(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("BEEP")
+    assert resp == "OK BEEP"
+
+
+@pytest.mark.asyncio
+async def test_beep_melody(device_addr):
+    """Shave-and-a-haircut melody should be accepted and queued."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("BEEP C'4 G8 -16 G8 A4 G8 -2 B4 C'4")
+    assert resp == "OK BEEP"
+
+
+@pytest.mark.asyncio
+async def test_beep_bad_note(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("BEEP Z4")
+    assert resp == "ERR BAD_MELODY"
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 

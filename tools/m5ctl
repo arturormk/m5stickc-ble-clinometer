@@ -96,6 +96,8 @@ examples:
   m5ctl stream 500         # enable streaming every 500 ms
   m5ctl night-mode on      # enable red-only night mode
   m5ctl night-mode off     # restore normal colors
+  m5ctl beep               # standard attention beep (880 Hz, 200 ms)
+  m5ctl beep C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2  # play a melody
   m5ctl listen             # print all notifications (use after stream)
   m5ctl scan               # discover nearby BLE devices
         """,
@@ -162,6 +164,15 @@ examples:
     p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
     p.add_argument("state", choices=["on", "off"], help="on or off")
 
+    p = sub.add_parser("beep",
+                       help="Play a beep or melody (beep [note ...])")
+    p.add_argument("notes", nargs="*",
+                   metavar="NOTE",
+                   help="Musical notation tokens, e.g. C4 E4 G4 C'2 "
+                        "(omit for a standard beep). "
+                        "Octave: ' up, , down from middle C. "
+                        "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
+
     args = parser.parse_args()
 
     match args.cmd:
@@ -199,6 +210,9 @@ examples:
             do_send(args, f"START_STREAM {args.period_ms}")
         case "night-mode":
             do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
+        case "beep":
+            cmd = "BEEP " + " ".join(args.notes) if args.notes else "BEEP"
+            do_send(args, cmd)
         case "listen":
             run(cmd_listen(args.device))
         case "scan":
