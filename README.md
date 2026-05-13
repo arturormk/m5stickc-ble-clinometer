@@ -511,7 +511,7 @@ uv run tools/m5ctl set-time "2026-05-04T21:00:00Z"
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
 uv run tools/m5ctl beep
-uv run tools/m5ctl beep C'4 G8 -16 G8 A4 G8 -2 B4 C'4
+uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
 uv run tools/m5ctl stream 500
 uv run tools/m5ctl listen
 ```
