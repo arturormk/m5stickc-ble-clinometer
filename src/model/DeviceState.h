@@ -51,6 +51,7 @@ struct DeviceState {
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];
     volatile bool pendingBleEventReady;
+    volatile bool bleClientWantsNewline;
 };
 
 inline time_t deviceCurrentTime(const DeviceState& s) {

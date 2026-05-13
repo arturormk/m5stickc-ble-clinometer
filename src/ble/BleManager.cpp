@@ -91,7 +91,10 @@ class BleServerCallbacks : public BLEServerCallbacks {
         if (s_state) s_state->bleConnected = true;
     }
     void onDisconnect(BLEServer*) override {
-        if (s_state) s_state->bleConnected = false;
+        if (s_state) {
+            s_state->bleConnected = false;
+            s_state->bleClientWantsNewline = false;
+        }
     }
 };
 
@@ -111,6 +114,10 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         size_t copyLen = val.size() < sizeof(cmd) - 1 ? val.size() : sizeof(cmd) - 1;
         memcpy(cmd, val.data(), copyLen);
         cmd[copyLen] = '\0';
+
+        // Detect newline-terminated protocol (sticky per connection)
+        if (!s_state->bleClientWantsNewline && val.back() == '\n')
+            s_state->bleClientWantsNewline = true;
 
         // Strip trailing whitespace/newline
         int end = (int)strlen(cmd) - 1;
@@ -408,7 +415,13 @@ void BleManager::update(DeviceState& state) {
 
 void BleManager::sendResponse(const char* msg) {
     if (!_pRespChar || !msg) return;
-    _pRespChar->setValue((uint8_t*)msg, strlen(msg));
+    if (s_state && s_state->bleClientWantsNewline) {
+        char buf[162]; // max pendingBleResponse (160) + '\n' + '\0'
+        snprintf(buf, sizeof(buf), "%s\n", msg);
+        _pRespChar->setValue((uint8_t*)buf, strlen(buf));
+    } else {
+        _pRespChar->setValue((uint8_t*)msg, strlen(msg));
+    }
     _pRespChar->notify();
 }
 

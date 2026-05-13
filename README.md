@@ -96,7 +96,9 @@ The device advertises continuously. After a central disconnects, advertising res
 
 ### Protocol
 
-Commands and responses are **ASCII text**, one per write/notify. Fields are space-separated. A trailing newline is accepted but not required.
+Commands and responses are **ASCII text**, one per write/notify. Fields are space-separated.
+
+**Newline framing (optional):** If a client sends commands that end with `\n` (or `\r\n`), the device detects this on the first such command and appends `\n` to every subsequent reply and async notification for that connection. This makes the stream appear as newline-delimited text to clients that treat BLE as a byte stream. Clients that send commands without a trailing `\n` receive plain responses with no terminator. The flag is sticky for the lifetime of a connection and resets on disconnect.
 
 Subscribe to notifications on the **Response** characteristic to receive replies and asynchronous events (button presses, screen changes). The device sends one notify per command reply.
 
@@ -402,9 +404,18 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 
 ---
 
-## tools/m5ctl
+## Python tools
 
-`tools/m5ctl` is a Python 3 command-line client for the BLE interface. It requires the [`bleak`](https://bleak.readthedocs.io/) library (`pip install bleak`).
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). From the project root:
+
+```bash
+uv sync          # create .venv with all dependencies
+uv sync --group dev   # include pytest / pytest-asyncio for running tests
+```
+
+### tools/m5ctl
+
+`tools/m5ctl` is a Python 3 command-line client for the BLE interface.
 
 ```
 usage: m5ctl [-h] [-d ADDR] [-t SEC] COMMAND ...
@@ -438,15 +449,41 @@ options:
 Examples:
 
 ```bash
-m5ctl tilt
-m5ctl status
-m5ctl set-time "2026-05-04T21:00:00Z"
-m5ctl set-radec "12:34:56" "+07:08:09"
-m5ctl night-mode on
-m5ctl night-mode off
-m5ctl stream 500
-m5ctl listen
+uv run tools/m5ctl tilt
+uv run tools/m5ctl status
+uv run tools/m5ctl set-time "2026-05-04T21:00:00Z"
+uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
+uv run tools/m5ctl night-mode on
+uv run tools/m5ctl stream 500
+uv run tools/m5ctl listen
 ```
+
+### tools/set-utc-now
+
+Bash wrapper that reads the current UTC clock, adds a small latency offset, and calls `m5ctl set-time` in one step:
+
+```bash
+uv run tools/set-utc-now
+```
+
+---
+
+## Test suite
+
+`tests/` contains a pytest suite that exercises the full BLE command interface against a real device, including the dynamic newline-framing protocol.
+
+```bash
+# Run all tests (device must be on and reachable)
+uv run pytest
+
+# Specify a non-default BLE address
+uv run pytest --device AA:BB:CC:DD:EE:FF
+
+# Run only the newline protocol tests
+uv run pytest tests/test_newline.py
+```
+
+Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 ---
 
@@ -454,6 +491,7 @@ m5ctl listen
 
 ```
 ├── platformio.ini         Build configuration (espressif32@6.1.0, m5stick-c)
+├── pyproject.toml         Python dependencies and pytest config (managed by uv)
 ├── src/
 │   ├── main.cpp           Arduino setup/loop — orchestrates all subsystems
 │   ├── model/
@@ -471,7 +509,12 @@ m5ctl listen
 │       ├── PowerManager.h/.cpp  M5StickCPlus2 init, battery voltage/level, power-off
 │       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
 ├── tools/
-│   └── m5ctl              Python 3 BLE command-line client (requires bleak)
+│   ├── m5ctl              Python 3 BLE command-line client
+│   └── set-utc-now        Bash helper: set device clock to current UTC
+├── tests/
+│   ├── conftest.py        BleSession helper and pytest fixtures
+│   ├── test_commands.py   BLE command interface tests
+│   └── test_newline.py    Newline-framing protocol tests
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
 ```
