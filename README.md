@@ -393,7 +393,8 @@ Plays a beep or a melody through the built-in speaker. The response is returned 
 → BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
 ← OK BEEP
 
-← ERR BAD_MELODY   (unrecognised note token)
+→ BEEP C4 Z4
+← BAD MELODY @4   (unrecognised note token; @N is 1-based position in melody string)
 ```
 
 With no arguments the device emits a single short attention beep (880 Hz, 200 ms). With note tokens it plays the sequence as a melody.
@@ -480,7 +481,7 @@ TILT +0.38 -1.12
 | `ERR UNKNOWN_COMMAND` | Command token not recognised |
 | `ERR BAD_ARGS` | Wrong number or format of arguments |
 | `ERR BAD_TIME` | `SET_TIME` value could not be parsed |
-| `ERR BAD_MELODY` | `BEEP` received an unrecognised note token |
+| `BAD MELODY @N` | `BEEP` received an unrecognised note token; `N` is the 1-based byte offset within the melody argument |
 
 ---
 

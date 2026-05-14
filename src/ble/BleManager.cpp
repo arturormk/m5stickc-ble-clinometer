@@ -111,7 +111,7 @@ static uint16_t noteFreq(int semitone, int octave) {
     return (uint16_t)(261.63f * powf(2.0f, total / 12.0f) + 0.5f);
 }
 
-static int parseMelody(const char* str, MelodyNote* notes, int maxNotes) {
+static int parseMelody(const char* str, MelodyNote* notes, int maxNotes, int* errPos) {
     char buf[256];
     strncpy(buf, str, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
@@ -131,7 +131,9 @@ static int parseMelody(const char* str, MelodyNote* notes, int maxNotes) {
                 case 'G': semi =  7; break;
                 case 'A': semi =  9; break;
                 case 'B': semi = 11; break;
-                default:  return 0;
+                default:
+                    if (errPos) *errPos = (int)((p - 1) - buf) + 1;
+                    return 0;
             }
             if (*p == '#') { semi++; p++; }
             else if (*p == 'b') { semi--; p++; }
@@ -413,8 +415,9 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 s_state->melodyNotes[0] = {880, 200};
                 s_state->melodyPendingLength = 1;
             } else {
-                int n = parseMelody(arg, (MelodyNote*)s_state->melodyNotes, MELODY_MAX_NOTES);
-                if (n <= 0) { strncpy(resp, "ERR BAD_MELODY", sizeof(resp) - 1); goto respond; }
+                int errPos = 0;
+                int n = parseMelody(arg, (MelodyNote*)s_state->melodyNotes, MELODY_MAX_NOTES, &errPos);
+                if (n <= 0) { snprintf(resp, sizeof(resp), "BAD MELODY @%d", errPos); goto respond; }
                 s_state->melodyPendingLength = n;
             }
             s_state->melodyPending = true;
