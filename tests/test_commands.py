@@ -297,6 +297,62 @@ async def test_cancel_msg(device_addr):
         assert resp == "MSG NONE"
 
 
+def _parse_screen(status: str) -> str:
+    """Extract the SCREEN=<name> value from a GET_STATUS response."""
+    for field in status.split():
+        if field.startswith("SCREEN="):
+            return field[7:]
+    return ""
+
+
+@pytest.mark.asyncio
+async def test_show_msg_while_active_preserves_prev_screen(device_addr):
+    """SHOW_MSG arriving while MESSAGE is already shown must not overwrite prevScreenIndex.
+
+    Without the fix the second SHOW_MSG would save SCREEN_MESSAGE into
+    prevScreenIndex; CANCEL_MSG would then restore that same value, leaving
+    the device stuck on a blank MESSAGE screen indefinitely.
+    """
+    async with BleSession(device_addr) as s:
+        await s.send("CANCEL_MSG")  # ensure a clean, non-MESSAGE starting screen
+        initial_screen = _parse_screen(await s.send("GET_STATUS"))
+        assert initial_screen and initial_screen != "MESSAGE"
+
+        await s.send("SHOW_MSG INF First message")
+        # Second SHOW_MSG arrives while already on the MESSAGE screen
+        await s.send("SHOW_MSG INF Second message")
+        assert "Second message" in await s.send("GET_MSG")
+
+        # After cancel the device must return to the original screen, not MESSAGE
+        await s.send("CANCEL_MSG")
+        screen_after = _parse_screen(await s.send("GET_STATUS"))
+        assert screen_after == initial_screen, (
+            f"Expected screen {initial_screen!r} after cancel, got {screen_after!r}"
+        )
+        assert await s.send("GET_MSG") == "MSG NONE"
+
+
+@pytest.mark.asyncio
+async def test_show_msg_wait_while_active_preserves_prev_screen(device_addr):
+    """SHOW_MSG_WAIT arriving while MESSAGE is already shown must not overwrite prevScreenIndex."""
+    async with BleSession(device_addr) as s:
+        await s.send("CANCEL_MSG")
+        initial_screen = _parse_screen(await s.send("GET_STATUS"))
+        assert initial_screen and initial_screen != "MESSAGE"
+
+        await s.send("SHOW_MSG_WAIT INF M5 First prompt")
+        # Second SHOW_MSG_WAIT arrives while already on the MESSAGE screen
+        await s.send("SHOW_MSG_WAIT INF M5 Second prompt")
+        assert "Second prompt" in await s.send("GET_MSG")
+
+        await s.send("CANCEL_MSG")
+        screen_after = _parse_screen(await s.send("GET_STATUS"))
+        assert screen_after == initial_screen, (
+            f"Expected screen {initial_screen!r} after cancel, got {screen_after!r}"
+        )
+        assert await s.send("GET_MSG") == "MSG NONE"
+
+
 # ---------------------------------------------------------------------------
 # START_STREAM / STOP_STREAM
 # ---------------------------------------------------------------------------

@@ -349,7 +349,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 s_state->messagePersistent   = false;
                 s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
             }
-            s_state->prevScreenIndex = s_state->screenIndex;
+            if (s_state->screenIndex != SCREEN_MESSAGE)
+                s_state->prevScreenIndex = s_state->screenIndex;
             s_state->messageActive   = true;
             s_state->screenIndex     = SCREEN_MESSAGE;
             strncpy(resp, "OK MSG", sizeof(resp) - 1);
@@ -371,7 +372,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 s_state->messagePersistent   = false;
                 s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
             }
-            s_state->prevScreenIndex = s_state->screenIndex;
+            if (s_state->screenIndex != SCREEN_MESSAGE)
+                s_state->prevScreenIndex = s_state->screenIndex;
             s_state->messageActive   = true;
             s_state->screenIndex     = SCREEN_MESSAGE;
             strncpy(resp, "OK MSG_WAIT", sizeof(resp) - 1);
