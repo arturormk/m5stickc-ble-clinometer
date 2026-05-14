@@ -27,10 +27,21 @@ static const char* screenName(int idx) {
     }
 }
 
-static bool parseIso8601(const char* s, time_t* out) {
-    int y, mo, d, h, mi, sec;
-    if (sscanf(s, "%d-%d-%dT%d:%d:%dZ", &y, &mo, &d, &h, &mi, &sec) != 6)
+static bool parseIso8601(const char* s, time_t* out, char* tzOut, size_t tzOutSize) {
+    int y, mo, d, h, mi, sec, n = 0;
+    if (sscanf(s, "%d-%d-%dT%d:%d:%d%n", &y, &mo, &d, &h, &mi, &sec, &n) < 6 || n == 0)
         return false;
+    if (tzOut) tzOut[0] = '\0';
+    const char* suffix = s + n;
+    if (*suffix == 'Z' || *suffix == 'z') {
+        if (tzOut) snprintf(tzOut, tzOutSize, "UTC");
+    } else if (*suffix == '\0') {
+        // bare datetime, no suffix — leave label empty
+    } else if (*suffix == '+' || *suffix == '-') {
+        if (tzOut) snprintf(tzOut, tzOutSize, "%s", suffix);
+    } else {
+        return false;
+    }
     struct tm t = {};
     t.tm_year  = y - 1900;
     t.tm_mon   = mo - 1;
@@ -42,6 +53,15 @@ static bool parseIso8601(const char* s, time_t* out) {
     time_t result = mktime(&t);
     if (result == (time_t)-1) return false;
     *out = result;
+    return true;
+}
+
+// Parses "HH:MM:SS" → seconds since midnight stored in *out.
+static bool parseSiderealHMS(const char* s, time_t* out) {
+    int h, m, sec;
+    if (sscanf(s, "%d:%d:%d", &h, &m, &sec) != 3) return false;
+    if (h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59) return false;
+    *out = (time_t)(h * 3600 + m * 60 + sec);
     return true;
 }
 
@@ -260,12 +280,37 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             char* iso = strtok_r(nullptr, " ", &saveptr);
             if (!iso) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
             time_t t;
-            if (!parseIso8601(iso, &t)) {
+            char tzBuf[16] = {};
+            if (!parseIso8601(iso, &t, tzBuf, sizeof(tzBuf))) {
                 strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
             } else {
+                if (tzBuf[0] == '\0') {
+                    char* tzTok = strtok_r(nullptr, " ", &saveptr);
+                    if (tzTok) snprintf(tzBuf, sizeof(tzBuf), "%s", tzTok);
+                }
                 s_state->timeEpochSec    = t;
                 s_state->timeSetAtMillis = millis();
+                s_state->siderealMode    = false;
+                strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
+                s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
                 strncpy(resp, "OK TIME", sizeof(resp) - 1);
+            }
+
+        } else if (strcasecmp(tok, "SET_SIDEREAL_TIME") == 0) {
+            char* hms = strtok_r(nullptr, " ", &saveptr);
+            if (!hms) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            time_t t;
+            if (!parseSiderealHMS(hms, &t)) {
+                strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
+            } else {
+                char* labelTok = strtok_r(nullptr, " ", &saveptr);
+                s_state->timeEpochSec    = t;
+                s_state->timeSetAtMillis = millis();
+                s_state->siderealMode    = true;
+                const char* label = (labelTok && labelTok[0]) ? labelTok : "LST";
+                strncpy(s_state->timezoneLabel, label, sizeof(s_state->timezoneLabel) - 1);
+                s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+                strncpy(resp, "OK SIDEREAL", sizeof(resp) - 1);
             }
 
         } else if (strcasecmp(tok, "SET_RADEC") == 0) {

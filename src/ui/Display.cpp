@@ -111,13 +111,24 @@ void Display::_drawTime(const DeviceState& state) {
     _sprite->setTextDatum(textdatum_t::middle_center);
     _sprite->drawString(timeBuf, 120, 50);
 
-    // Date: YYYY-MM-DD smaller below
-    char dateBuf[12];
-    snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
-             ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
-    _sprite->drawString(dateBuf, 120, 105);
+    if (state.siderealMode) {
+        // Sidereal mode: label ("LST") replaces calendar date
+        _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
+        const char* lbl = state.timezoneLabel[0] ? state.timezoneLabel : "LST";
+        _sprite->drawString(lbl, 120, 105);
+    } else {
+        // Solar mode: calendar date + optional timezone label below
+        char dateBuf[12];
+        snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+        _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
+        _sprite->drawString(dateBuf, 120, 105);
+        if (state.timezoneLabel[0] != '\0') {
+            _sprite->setTextColor(_c(TFT_DARKGREY, n));
+            _sprite->drawString(state.timezoneLabel, 120, 118);
+        }
+    }
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 

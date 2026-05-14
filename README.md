@@ -53,7 +53,7 @@ The **M5 front button** cycles through screens in order:
 | # | Screen | Description |
 |---|---|---|
 | 0 | Clinometer | Bubble level with 1°/2°/3° rings, numeric X/Y tilt readout |
-| 1 | Time | Current UTC time (HH:MM:SS) and date set by the Pi |
+| 1 | Time | Current time (HH:MM:SS) — solar or sidereal — and date or label set via BLE |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
 | 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
@@ -204,17 +204,52 @@ The second field is the remaining lifetime in seconds, or `INF` for a persistent
 
 ---
 
-### `SET_TIME <iso8601>`
+### `SET_TIME <iso8601> [<tz>]`
 
 Sets the device clock. The device ticks locally from this point.
 
 ```
-→ SET_TIME 2026-04-19T18:42:10Z
+→ SET_TIME 2026-05-14T12:30:00Z
 ← OK TIME
+
+→ SET_TIME 2026-05-14T12:30:00+01:00
+← OK TIME
+
+→ SET_TIME 2026-05-14T12:30:00 CET
+← OK TIME
+
 ← ERR BAD_TIME
 ```
 
-Format must be `YYYY-MM-DDTHH:MM:SSZ` (UTC, Z suffix required).
+The datetime part is always `YYYY-MM-DDTHH:MM:SS` and is stored at face value — the device performs no UTC conversion. The optional timezone label is display-only: it appears on the time screen below the date and is not interpreted by the firmware.
+
+| Suffix | Label shown | Example |
+|---|---|---|
+| `Z` | `UTC` | `2026-05-14T12:30:00Z` |
+| `+HH:MM` / `-HH:MM` | the offset string | `2026-05-14T12:30:00+01:00` |
+| separate token | the token | `2026-05-14T12:30:00 CET` |
+| (none) | nothing | `2026-05-14T12:30:00` |
+
+No DST logic is applied; the timezone string is purely informational.
+
+---
+
+### `SET_SIDEREAL_TIME <HH:MM:SS> [<label>]`
+
+Switches the device clock to sidereal mode, advancing at the sidereal rate (≈ 366.2422/365.2422 × solar rate). The calendar date is suppressed on screen; the label (default `LST`) is shown in its place.
+
+```
+→ SET_SIDEREAL_TIME 14:32:00
+← OK SIDEREAL
+
+→ SET_SIDEREAL_TIME 14:32:00 LST
+← OK SIDEREAL
+
+← ERR BAD_TIME
+← ERR BAD_ARGS
+```
+
+Time is stored at face value and ticked forward at the sidereal rate. Use `SET_TIME` to leave sidereal mode and return to solar time.
 
 ---
 
@@ -355,7 +390,7 @@ Plays a beep or a melody through the built-in speaker. The response is returned 
 → BEEP
 ← OK BEEP
 
-→ BEEP C'4 G8 -16 G8 A4 G8 -2 B4 C'4
+→ BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
 ← OK BEEP
 
 ← ERR BAD_MELODY   (unrecognised note token)
@@ -394,7 +429,7 @@ Bare letter names (no `'` or `,`) are in the middle register. A single `'` shift
 "Shave And A Hair Cut":
 
 ```
-BEEP C'4 G8 -16 G8 A4 G8 -2 B4 C'4
+BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
 ```
 
 Up to 32 notes per command.
@@ -489,7 +524,9 @@ options:
 | `get-radec` | | Get stored RA/Dec values |
 | `get-altaz` | | Get stored Alt/Az values |
 | `get-msg` | | Get current message state |
-| `set-time` | `<iso8601>` | Set device clock from UTC ISO-8601 string |
+| `set-time` | `<iso8601> [<tz>]` | Set device clock; optional timezone label for display |
+| `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time |
+| `set-sidereal-now` | `--longitude DEG [--dut1 SEC] [--label STR] [--offset N]` | Set device to current Local Sidereal Time |
 | `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
 | `set-altaz` | `<alt> <az>` | Set Alt/Az display values |
 | `show-msg` | `<seconds\|inf> <text>` | Display a timed or persistent message |
@@ -507,7 +544,15 @@ Examples:
 ```bash
 uv run tools/m5ctl tilt
 uv run tools/m5ctl status
-uv run tools/m5ctl set-time "2026-05-04T21:00:00Z"
+uv run tools/m5ctl set-time-now
+uv run tools/m5ctl set-time-now --utc
+uv run tools/m5ctl set-time-now --timezone Europe/Madrid
+uv run tools/m5ctl set-time-now --timezone CEST
+uv run tools/m5ctl set-time "2026-05-14T12:30:00Z"
+uv run tools/m5ctl set-time "2026-05-14T12:30:00+01:00"
+uv run tools/m5ctl set-time "2026-05-14T12:30:00" CET
+uv run tools/m5ctl set-sidereal-now --longitude -3.7
+uv run tools/m5ctl set-sidereal-now --longitude -3.7 --dut1 0.2 --label LST
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
 uv run tools/m5ctl beep
@@ -516,13 +561,33 @@ uv run tools/m5ctl stream 500
 uv run tools/m5ctl listen
 ```
 
-### tools/set-utc-now
-
-Bash wrapper that reads the current UTC clock, adds a small latency offset, and calls `m5ctl set-time` in one step:
+### `set-time-now` — set device clock to current host time
 
 ```bash
-uv run tools/set-utc-now
+uv run tools/m5ctl set-time-now                    # local time (label = system TZ abbreviation)
+uv run tools/m5ctl set-time-now --utc              # UTC time (label: UTC)
+uv run tools/m5ctl set-time-now --timezone CEST    # time in CEST (UTC+2); label: CEST
+uv run tools/m5ctl set-time-now --timezone Europe/Madrid  # IANA timezone; label: Europe/Madrid
+uv run tools/m5ctl set-time-now --offset 0         # no latency compensation
 ```
+
+`--utc`, `--local`, and `--timezone` are mutually exclusive. `--offset N` (default `3`) adds seconds to compensate for BLE connection latency, matching the behaviour of the old `set-utc-now` script.
+
+Timezone resolution: IANA names (e.g. `Europe/Madrid`, `America/New_York`) are resolved via `zoneinfo`. Common abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their canonical IANA zone for time computation; the label shown on the device screen is always the string you passed.
+
+### `set-sidereal-now` — set device to current Local Sidereal Time
+
+```bash
+uv run tools/m5ctl set-sidereal-now --longitude -3.7              # Madrid (UTC+1/+2)
+uv run tools/m5ctl set-sidereal-now --longitude 0.0               # Greenwich
+uv run tools/m5ctl set-sidereal-now --longitude -3.7 --dut1 0.2  # with DUT1 correction
+uv run tools/m5ctl set-sidereal-now --longitude -3.7 --label LST  # custom label
+```
+
+`--longitude` (required) is degrees east; negative for west. `--dut1` is DUT1 = UT1 − UTC in seconds (from the [IERS bulletin](https://www.iers.org/), typically < 0.9 s; default `0`). `--label` sets the string shown on the device screen (default `LST`). `--offset N` (default `3`) adds BLE latency compensation as with `set-time-now`.
+
+LST is computed using the IAU 1982 GMST formula. The device ticks at the sidereal rate (≈ 1.00274× solar). To return to solar time, send any `set-time` or `set-time-now` command.
+
 
 ---
 
@@ -567,8 +632,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │       ├── PowerManager.h/.cpp  M5StickCPlus2 init, battery voltage/level, power-off
 │       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
 ├── tools/
-│   ├── m5ctl              Python 3 BLE command-line client
-│   └── set-utc-now        Bash helper: set device clock to current UTC
+│   └── m5ctl              Python 3 BLE command-line client
 ├── tests/
 │   ├── conftest.py        BleSession helper and pytest fixtures
 │   ├── test_commands.py   BLE command interface tests

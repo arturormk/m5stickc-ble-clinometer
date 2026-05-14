@@ -4,6 +4,8 @@
 import asyncio
 import argparse
 import sys
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from bleak import BleakClient, BleakScanner, BleakError
 
 DEFAULT_ADDRESS = "F0:24:F9:9B:E2:52"
@@ -77,6 +79,48 @@ def do_send(args, command: str) -> None:
     run(go())
 
 
+def _compute_lst(utc_unix: float, longitude_deg: float, dut1: float = 0.0) -> int:
+    """Returns current Local Sidereal Time as integer seconds [0, 86400)."""
+    ut1 = utc_unix + dut1
+    jd  = ut1 / 86400.0 + 2440587.5
+    d   = jd - 2451545.0
+    T   = d / 36525.0
+    gmst_deg = (280.46061837
+                + 360.98564736629 * d
+                + 0.000387933 * T**2
+                - T**3 / 38710000.0) % 360.0
+    lst_deg  = (gmst_deg + longitude_deg) % 360.0
+    return int(lst_deg * 240.0) % 86400
+
+
+_TZ_ABBREVS: dict[str, str] = {
+    "UTC":  "UTC",    "GMT":  "GMT",
+    "CET":  "Europe/Paris",    "CEST": "Europe/Paris",
+    "WET":  "Europe/Lisbon",   "WEST": "Europe/Lisbon",
+    "EET":  "Europe/Helsinki", "EEST": "Europe/Helsinki",
+    "EST":  "America/New_York","EDT":  "America/New_York",
+    "CST":  "America/Chicago", "CDT":  "America/Chicago",
+    "MST":  "America/Denver",  "MDT":  "America/Denver",
+    "PST":  "America/Los_Angeles", "PDT": "America/Los_Angeles",
+    "IST":  "Asia/Kolkata",   "JST":  "Asia/Tokyo",
+    "AEST": "Australia/Sydney","AEDT": "Australia/Sydney",
+}
+
+
+def _resolve_tz(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, KeyError):
+        pass
+    iana = _TZ_ABBREVS.get(name.upper())
+    if iana:
+        return ZoneInfo(iana)
+    raise SystemExit(
+        f"Unknown timezone: {name!r}. "
+        "Use an IANA name (e.g. Europe/Madrid) or a known abbreviation (CET, CEST, EST…)"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="m5ctl",
@@ -86,7 +130,11 @@ def main() -> None:
 examples:
   m5ctl tilt
   m5ctl status
-  m5ctl set-time "2026-05-02T17:35:00Z"
+  m5ctl set-time-now                    # local time (default)
+  m5ctl set-time-now --utc             # UTC
+  m5ctl set-time-now --timezone CEST   # named timezone
+  m5ctl set-time-now --timezone Europe/Madrid
+  m5ctl set-time "2026-05-14T12:30:00+01:00"
   m5ctl set-radec "12:34:56" "+07:08:09"
   m5ctl set-altaz "+43.2" "181.7"
   m5ctl show-msg 5 "Moving altitude axis"
@@ -133,8 +181,34 @@ examples:
     sub.add_parser("scan",        help="Scan for nearby BLE devices")
 
     # --- parameterised commands ---
-    p = sub.add_parser("set-time",  help="Set device clock from UTC ISO-8601 string")
-    p.add_argument("time", help="e.g. 2026-05-02T17:35:00Z")
+    p = sub.add_parser("set-time",
+                       help="Set device clock from ISO-8601 string with optional timezone label")
+    p.add_argument("time", help="e.g. 2026-05-14T12:30:00Z  or  2026-05-14T12:30:00+01:00")
+    p.add_argument("tz",   nargs="?",
+                   help="Optional timezone label e.g. CET, EST (use when time has no offset suffix)")
+
+    p = sub.add_parser("set-time-now",
+                       help="Set device clock to the current host time")
+    grp = p.add_mutually_exclusive_group()
+    grp.add_argument("--utc",      action="store_true",
+                     help="Use UTC time (label: UTC)")
+    grp.add_argument("--local",    action="store_true",
+                     help="Use host local time (default)")
+    grp.add_argument("--timezone", metavar="TZ",
+                     help="Use named timezone, e.g. Europe/Madrid or CEST")
+    p.add_argument("--offset", type=int, default=3, metavar="N",
+                   help="Seconds added for BLE latency compensation (default: 3)")
+
+    p = sub.add_parser("set-sidereal-now",
+                       help="Set device clock to current Local Sidereal Time")
+    p.add_argument("--longitude", type=float, required=True, metavar="DEG",
+                   help="Observer longitude in degrees east (negative = west)")
+    p.add_argument("--dut1",     type=float, default=0.0,  metavar="SEC",
+                   help="DUT1 = UT1 - UTC in seconds (from IERS bulletin, default 0)")
+    p.add_argument("--label",    default="LST", metavar="STR",
+                   help="Label shown on device screen (default: LST)")
+    p.add_argument("--offset",   type=int, default=3, metavar="N",
+                   help="Seconds added for BLE latency compensation (default: 3)")
 
     p = sub.add_parser("set-radec", help="Set RA/Dec display values")
     p.add_argument("ra",  help="e.g. 12:34:56")
@@ -195,7 +269,35 @@ examples:
         case "stop-stream":
             do_send(args, "STOP_STREAM")
         case "set-time":
-            do_send(args, f"SET_TIME {args.time}")
+            cmd = f"SET_TIME {args.time}"
+            if args.tz:
+                cmd += f" {args.tz}"
+            do_send(args, cmd)
+        case "set-time-now":
+            offset = timedelta(seconds=args.offset)
+            if args.utc:
+                now = datetime.now(timezone.utc) + offset
+                label = "UTC"
+            elif args.timezone:
+                tz = _resolve_tz(args.timezone)
+                now = datetime.now(tz) + offset
+                label = args.timezone[:15]
+            else:
+                now = datetime.now().astimezone() + offset
+                label = now.strftime("%Z")
+            ts = now.strftime("%Y-%m-%dT%H:%M:%S")
+            cmd = f"SET_TIME {ts}"
+            if label:
+                cmd += f" {label}"
+            do_send(args, cmd)
+        case "set-sidereal-now":
+            utc_now = datetime.now(timezone.utc).timestamp() + args.offset
+            lst_sec = _compute_lst(utc_now, args.longitude, args.dut1)
+            h = lst_sec // 3600
+            m = (lst_sec % 3600) // 60
+            s = lst_sec % 60
+            ts = f"{h:02d}:{m:02d}:{s:02d}"
+            do_send(args, f"SET_SIDEREAL_TIME {ts} {args.label}")
         case "set-radec":
             do_send(args, f"SET_RADEC {args.ra} {args.dec}")
         case "set-altaz":

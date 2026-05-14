@@ -36,6 +36,8 @@ struct DeviceState {
 
     time_t   timeEpochSec;       // 0 = not set
     uint32_t timeSetAtMillis;
+    char     timezoneLabel[16];  // e.g. "UTC", "+01:00", "CET"; empty = not set
+    bool     siderealMode;       // if true, tick at sidereal rate (366.2422/365.2422)
 
     char raText[32];
     char decText[32];
@@ -70,5 +72,10 @@ struct DeviceState {
 
 inline time_t deviceCurrentTime(const DeviceState& s) {
     if (s.timeEpochSec == 0) return 0;
-    return s.timeEpochSec + (time_t)((millis() - s.timeSetAtMillis) / 1000UL);
+    uint32_t elapsedMs = millis() - s.timeSetAtMillis;
+    if (s.siderealMode) {
+        // Sidereal rate ≈ 1002738/1000000; use 64-bit to avoid overflow in product
+        elapsedMs = (uint32_t)((uint64_t)elapsedMs * 1002738ULL / 1000000ULL);
+    }
+    return s.timeEpochSec + (time_t)(elapsedMs / 1000UL);
 }

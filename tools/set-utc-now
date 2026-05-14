@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-# Sends the current UTC time to the M5StickC, advanced by OFFSET_SECONDS
-# to compensate for BLE connection and transmission latency.
-
-OFFSET_SECONDS=3
-
-TIMESTAMP=$(date -u -d "+${OFFSET_SECONDS} seconds" +"%Y-%m-%dT%H:%M:%SZ")
-echo "Setting time: $TIMESTAMP"
-"$(dirname "$0")/m5ctl" set-time "$TIMESTAMP"

@@ -127,6 +127,48 @@ async def test_set_time_missing_arg(device_addr):
     assert resp == "ERR BAD_ARGS"
 
 
+@pytest.mark.asyncio
+async def test_set_time_with_numeric_offset(device_addr):
+    """Embedded numeric offset (+HH:MM) is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME 2026-05-14T12:30:00+01:00")
+    assert resp == "OK TIME"
+
+
+@pytest.mark.asyncio
+async def test_set_time_with_named_tz(device_addr):
+    """Space-separated timezone label is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME 2026-05-14T12:30:00 CET")
+    assert resp == "OK TIME"
+
+
+@pytest.mark.asyncio
+async def test_set_time_no_tz_suffix(device_addr):
+    """Bare datetime without Z or offset is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME 2026-05-14T12:30:00")
+    assert resp == "OK TIME"
+
+
+# ---------------------------------------------------------------------------
+# SET_SIDEREAL_TIME
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_sidereal_time_valid(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_SIDEREAL_TIME 14:32:00")
+    assert resp == "OK SIDEREAL"
+
+
+@pytest.mark.asyncio
+async def test_set_sidereal_time_bad_format(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_SIDEREAL_TIME not-a-time")
+    assert resp == "ERR BAD_TIME"
+
+
 # ---------------------------------------------------------------------------
 # SET_RADEC / GET_RADEC
 # ---------------------------------------------------------------------------
