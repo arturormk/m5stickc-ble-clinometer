@@ -31,20 +31,35 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 
 ## Building
 
-This is a [PlatformIO](https://platformio.org/) project targeting the Arduino framework.
+This is a [PlatformIO](https://platformio.org/) project targeting the Arduino framework. Use the `flash` script to build and upload in one step:
 
 ```bash
-# Build
-~/.platformio/penv/bin/pio run
-
-# Flash
-~/.platformio/penv/bin/pio run -t upload
-
-# Build + flash in one step
-~/.platformio/penv/bin/pio run -t upload --upload-port /dev/ttyUSB0
+./flash                  # build + flash to m5stickc-plus2 (default)
+./flash m5stickc-plus2
+./flash m5stack-core2
+./flash m5stack-cores3
+./flash -h               # show usage
 ```
 
-Requires PlatformIO with the `espressif32@6.1.0` platform installed. The `m5stack/M5StickCPlus2` library (and its dependencies: M5Unified, M5GFX) is fetched automatically on first build.
+Compilation is incremental — only changed files are recompiled. The script replaces the old separate `build` and `deploy` scripts.
+
+### Supported board environments
+
+| Environment | Board | Platform |
+|---|---|---|
+| `m5stickc-plus2` | M5StickC Plus 2 | espressif32 @ 6.1.0 |
+| `m5stack-core2` | M5Stack Core2 | espressif32 @ 6.1.0 |
+| `m5stack-cores3` | M5Stack CoreS3 | espressif32 @ 7.x |
+
+The source uses **M5Unified** (`m5stack/M5Unified`) rather than the device-specific `M5StickCPlus2` library. `M5.Imu.isEnabled()` and `M5.Speaker.isEnabled()` guards are used throughout so the firmware degrades gracefully on boards that lack an IMU or speaker — the clinometer screen shows `IMU N/A` and BEEP commands are silently skipped. The display layout is designed for 240×135 (M5StickC landscape); it will compile on larger-screen boards but pixel positions are not yet scaled.
+
+### CoreS3 note
+
+CoreS3 uses ESP32-S3, which requires `espressif32@7.x`. PlatformIO downloads it automatically on first build for that environment. You also need `intelhex` in PlatformIO's own virtualenv:
+
+```bash
+~/.platformio/penv/bin/pip install intelhex
+```
 
 ## Screens
 
@@ -614,7 +629,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 ## Project structure
 
 ```
-├── platformio.ini         Build configuration (espressif32@6.1.0, m5stick-c)
+├── flash                  Build + flash script; accepts env name, defaults to m5stickc-plus2
+├── platformio.ini         Build config: M5Unified, espressif32, three board environments
 ├── pyproject.toml         Python dependencies and pytest config (managed by uv)
 ├── src/
 │   ├── main.cpp           Arduino setup/loop — orchestrates all subsystems
@@ -630,7 +646,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   ├── Display.h
 │   │   └── Display.cpp    All six screen renderers (sprite-buffered via M5GFX)
 │   └── system/
-│       ├── PowerManager.h/.cpp  M5StickCPlus2 init, battery voltage/level, power-off
+│       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, power-off
 │       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
 ├── tools/
 │   └── m5ctl              Python 3 BLE command-line client
@@ -646,6 +662,6 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
-- Hardware is initialised through `M5StickCPlus2.h` / M5Unified; the display uses M5GFX sprite double-buffering for flicker-free rendering.
+- Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering.
 - All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick.
 - Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.

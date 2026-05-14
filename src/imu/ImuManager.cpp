@@ -1,5 +1,5 @@
 #include "ImuManager.h"
-#include <M5StickCPlus2.h>
+#include <M5Unified.h>
 #include <math.h>
 
 void ImuManager::begin() {
@@ -9,6 +9,12 @@ void ImuManager::begin() {
 }
 
 void ImuManager::update(DeviceState& state) {
+    if (!M5.Imu.isEnabled()) {
+        state.imuAvailable = false;
+        return;
+    }
+    state.imuAvailable = true;
+
     uint32_t now = millis();
     if ((now - _lastSampleMs) < SAMPLE_INTERVAL_MS) return;
     _lastSampleMs = now;

@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "bleak>=0.21.0",
+    "intelhex>=2.3.0",
     "tzdata>=2024.1",
 ]
 

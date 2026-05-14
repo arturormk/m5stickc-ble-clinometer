@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <M5StickCPlus2.h>
+#include <M5Unified.h>
 #include "model/DeviceState.h"
 #include "imu/ImuManager.h"
 #include "ble/BleManager.h"
@@ -18,6 +18,7 @@ PowerManager g_power;
 static uint32_t s_lastBatMs = 0;
 
 static void tickMelody(DeviceState& state) {
+    if (!M5.Speaker.isEnabled()) return;
     if (state.melodyPending) {
         state.melodyLength      = state.melodyPendingLength;
         state.melodyNoteIdx     = 0;

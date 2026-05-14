@@ -1,5 +1,5 @@
 #pragma once
-#include <M5StickCPlus2.h>
+#include <M5Unified.h>
 #include "../model/DeviceState.h"
 
 class Display {

@@ -56,6 +56,15 @@ void Display::_drawClinometer(const DeviceState& state) {
         _sprite->drawCircle(CX, CY, r, col);
     }
 
+    if (!state.imuAvailable) {
+        _sprite->setFont(&fonts::Font4);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->setTextDatum(textdatum_t::middle_center);
+        _sprite->drawString("IMU N/A", CX, CY);
+        _sprite->setTextDatum(textdatum_t::top_left);
+        return;
+    }
+
     // Bubble position (clamped to max radius)
     int bx = CX + (int)(state.tiltYDeg * MAX_R / 3.0f);
     int by = CY - (int)(state.tiltXDeg * MAX_R / 3.0f);

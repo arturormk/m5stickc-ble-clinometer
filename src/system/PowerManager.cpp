@@ -1,5 +1,5 @@
 #include "PowerManager.h"
-#include <M5StickCPlus2.h>
+#include <M5Unified.h>
 #include <esp_system.h>
 
 void PowerManager::begin() {

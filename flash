@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+
+VALID_ENVS=(m5stickc-plus2 m5stack-core2 m5stack-cores3)
+DEFAULT_ENV="m5stickc-plus2"
+PIO="$HOME/.platformio/penv/bin/pio"
+
+usage() {
+    echo "Usage: $(basename "$0") [ENV]"
+    echo ""
+    echo "Build (if needed) and flash firmware to a target board."
+    echo "Compilation is skipped when firmware is already up to date."
+    echo ""
+    echo "  ENV   PlatformIO environment name (default: $DEFAULT_ENV)"
+    echo "        Available: ${VALID_ENVS[*]}"
+}
+
+ENV="${1:-$DEFAULT_ENV}"
+
+if [[ "$ENV" == "-h" || "$ENV" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+valid=0
+for e in "${VALID_ENVS[@]}"; do
+    [[ "$ENV" == "$e" ]] && valid=1 && break
+done
+if [[ $valid -eq 0 ]]; then
+    echo "error: unknown environment '$ENV'" >&2
+    echo "available: ${VALID_ENVS[*]}" >&2
+    exit 1
+fi
+
+"$PIO" run -e "$ENV" -t upload

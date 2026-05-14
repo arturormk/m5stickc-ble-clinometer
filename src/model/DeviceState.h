@@ -30,6 +30,7 @@ struct DeviceState {
     float    batteryVoltage;
     int      batteryLevel;    // 0-100, or -1 if unknown
 
+    bool     imuAvailable;
     float    tiltXDeg;
     float    tiltYDeg;
     uint32_t tiltTimestampMs;
