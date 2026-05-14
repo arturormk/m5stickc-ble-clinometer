@@ -378,7 +378,8 @@ async def test_stream_minimum_period(device_addr):
 async def test_stop_stream(device_addr):
     async with BleSession(device_addr) as s:
         await s.send("START_STREAM 200")
-        resp = await s.send("STOP_STREAM")
+        await s.send_no_wait("STOP_STREAM")
+        resp = await s.recv_matching("OK STREAM", timeout=2.0)
         assert resp == "OK STREAM 0"
 
 

@@ -22,9 +22,9 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 
 | Item | Detail |
 |---|---|
-| Device | M5StickC Plus 2 |
+| Reference device | M5StickC Plus 2 |
 | MCU | ESP32 |
-| Display | ST7789 135×240 LCD (landscape: 240×135) |
+| Display | ST7789 135×240 LCD (landscape: 240×135); layout adapts to other resolutions |
 | IMU | MPU6886 6-axis accelerometer/gyroscope |
 | PMIC | AXP2101 (battery management) |
 | Communication | Bluetooth Low Energy (BLE 4.2) |
@@ -51,7 +51,7 @@ Compilation is incremental — only changed files are recompiled. The script rep
 | `m5stack-core2` | M5Stack Core2 | espressif32 @ 6.1.0 |
 | `m5stack-cores3` | M5Stack CoreS3 | espressif32 @ 7.x |
 
-The source uses **M5Unified** (`m5stack/M5Unified`) rather than the device-specific `M5StickCPlus2` library. `M5.Imu.isEnabled()` and `M5.Speaker.isEnabled()` guards are used throughout so the firmware degrades gracefully on boards that lack an IMU or speaker — the clinometer screen shows `IMU N/A` and BEEP commands are silently skipped. The display layout is designed for 240×135 (M5StickC landscape); it will compile on larger-screen boards but pixel positions are not yet scaled.
+The source uses **M5Unified** (`m5stack/M5Unified`) rather than the device-specific `M5StickCPlus2` library. `M5.Imu.isEnabled()` and `M5.Speaker.isEnabled()` guards are used throughout so the firmware degrades gracefully on boards that lack an IMU or speaker — the clinometer screen shows `IMU N/A` and BEEP commands are silently skipped. The display layout adapts to the actual screen dimensions reported by `M5.Display` after `setRotation()`: all pixel coordinates, margins, bar sizes, and bubble radii are derived from `width()` and `height()` at start-up, so the same code renders correctly on the M5StickC Plus 2 (240×135) and on larger displays such as the Core2 or CoreS3 (320×240).
 
 ### CoreS3 note
 
@@ -662,6 +662,6 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
-- Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering.
+- Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
 - All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick.
 - Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.

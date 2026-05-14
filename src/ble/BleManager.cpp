@@ -170,6 +170,7 @@ class BleServerCallbacks : public BLEServerCallbacks {
         if (s_state) {
             s_state->bleConnected = false;
             s_state->bleClientWantsNewline = false;
+            s_state->streamEnabled = false;
         }
     }
 };
