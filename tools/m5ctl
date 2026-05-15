@@ -83,13 +83,15 @@ async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
 async def cmd_scan() -> None:
     """Discover nearby BLE peripherals."""
     print("Scanning for 5 seconds…", file=sys.stderr)
-    devices = await BleakScanner.discover(timeout=5.0)
-    if not devices:
+    results = await BleakScanner.discover(timeout=5.0, return_adv=True)
+    if not results:
         print("No devices found.")
         return
-    for d in sorted(devices, key=lambda x: x.rssi or -999, reverse=True):
+    pairs = sorted(results.values(), key=lambda x: x[1].rssi or -999, reverse=True)
+    for d, adv in pairs:
         name = d.name or "(unknown)"
-        print(f"  {d.address}  {d.rssi:4d} dBm  {name}")
+        rssi = adv.rssi or -999
+        print(f"  {d.address}  {rssi:4d} dBm  {name}")
 
 
 def run(coro) -> None:

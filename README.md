@@ -597,8 +597,9 @@ SCREEN=CLINOMETER;BLE=1;BAT=3.96;STREAM=0
 Dependencies are managed with [uv](https://docs.astral.sh/uv/). From the project root:
 
 ```bash
-uv sync          # create .venv with all dependencies
-uv sync --group dev   # include pytest / pytest-asyncio for running tests
+uv sync                  # create .venv with all dependencies
+uv sync --group dev      # include pytest / pytest-asyncio for running tests
+uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 ```
 
 ### tools/m5ctl
@@ -690,6 +691,33 @@ uv run tools/m5ctl set-sidereal-now --longitude -3.7 --label LST  # custom label
 LST is computed using the IAU 1982 GMST formula. The device ticks at the sidereal rate (≈ 1.00274× solar). To return to solar time, send any `set-time` or `set-time-now` command.
 
 
+### tests/3d_model.py — real-time 3D orientation viewer
+
+`tests/3d_model.py` connects to the device over BLE and renders a live 3D model that tracks the device's pitch and roll in real time. It requires the `tools` dependency group (pygame + PyOpenGL):
+
+```bash
+uv sync --group tools
+```
+
+**Three operating modes:**
+
+| Mode | Command | Description |
+|---|---|---|
+| Scan | `uv run --group tools python tests/3d_model.py` | Scans for BLE devices, shows a numbered list, prompts for selection |
+| Direct | `uv run --group tools python tests/3d_model.py --device F0:24:F9:9B:E2:52` | Connects directly to the given address |
+| Simulator | `uv run --group tools python tests/3d_model.py --sim` | Animated demo — no BLE required |
+
+**Keyboard controls:**
+
+| Key | Action |
+|---|---|
+| `1` | Switch to M5StickC Plus 2 model |
+| `2` | Switch to M5Stack Core 2 model |
+| `3` | Switch to M5Stack CoreS3 model |
+| `Q` / `Esc` | Quit |
+
+The viewer renders labeled X/Y/Z accelerometer axis arrows that match the physical orientation printed on each device. The HUD shows live pitch/roll angles, the reconstructed gravity vector, and BLE connection state. If the device disconnects, the last known orientation is held and the viewer auto-reconnects after ~3 seconds.
+
 ---
 
 ## Test suite
@@ -738,7 +766,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 ├── tests/
 │   ├── conftest.py        BleSession helper and pytest fixtures
 │   ├── test_commands.py   BLE command interface tests
-│   └── test_newline.py    Newline-framing protocol tests
+│   ├── test_newline.py    Newline-framing protocol tests
+│   └── 3d_model.py        Real-time 3D orientation viewer (pygame + PyOpenGL)
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
 ```
@@ -750,3 +779,9 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
 - All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick.
 - Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.
+
+---
+
+## Acknowledgements
+
+Thanks to [@senshu-hiro](https://github.com/senshu-hiro) for the idea and initial implementation of the 3D orientation viewer, and for suggesting several features that made it into the firmware: the `BEEP` command, time-zone support in `SET_TIME`, the `CALIBRATE` command, multi-product support (Core 2 and CoreS3), and adaptive newline termination in BLE responses.
