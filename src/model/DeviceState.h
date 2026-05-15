@@ -33,6 +33,7 @@ struct DeviceState {
     bool     imuAvailable;
     float    pitchDeg;
     float    rollDeg;
+    float    gravX;           // raw filtered gravity X component (device frame, before calibration)
     uint32_t tiltTimestampMs;
 
     time_t   timeEpochSec;       // 0 = not set

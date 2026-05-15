@@ -19,6 +19,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Exposes a **BLE GATT service** so a Raspberry Pi can query tilt angles and update the displayed data at any time, regardless of which screen is active
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
+- **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
 
 ## Hardware
 
@@ -75,6 +76,8 @@ The **M5 front button** cycles through screens in order:
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
 | 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
+
+The display auto-rotates 180° based on the raw IMU gravity reading. When the screen's current top edge drifts more than ~17° past vertical away from physical up, the display flips to the opposite landscape orientation and flips back once the original orientation is again more than ~17° closer to physical up. All screens and overlays rotate together.
 
 ## Button behaviour
 

@@ -22,6 +22,18 @@ void Display::update(const DeviceState& state) {
     if ((now - _lastRefreshMs) < interval) return;
     _lastRefreshMs = now;
 
+    // Auto-rotate 180° when screen "up" (X axis) drifts away from world up.
+    // Hysteresis at ±0.3 g prevents flicker near the transition.
+    if (state.imuAvailable) {
+        if (!_screenFlipped && state.gravX > 0.3f) {
+            _screenFlipped = true;
+            M5.Display.setRotation(1);
+        } else if (_screenFlipped && state.gravX < -0.3f) {
+            _screenFlipped = false;
+            M5.Display.setRotation(3);
+        }
+    }
+
     _sprite->fillScreen(TFT_BLACK);
 
     switch (state.screenIndex) {

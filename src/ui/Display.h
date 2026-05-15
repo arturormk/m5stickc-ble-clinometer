@@ -12,6 +12,7 @@ private:
     LGFX_Sprite* _sprite = nullptr;
     uint32_t     _lastRefreshMs = 0;
     int          _W = 0, _H = 0;   // screen dimensions, set in begin()
+    bool         _screenFlipped = false;
 
     void _drawClinometer(const DeviceState& state);
     void _drawTime(const DeviceState& state);

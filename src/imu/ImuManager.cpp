@@ -51,6 +51,8 @@ void ImuManager::update(DeviceState& state) {
     _lastGy = ALPHA * ay + (1.0f - ALPHA) * _lastGy;
     _lastGz = ALPHA * az + (1.0f - ALPHA) * _lastGz;
 
+    state.gravX = _lastGx;
+
     // Apply calibration rotation
     float gcx, gcy, gcz;
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
