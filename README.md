@@ -4,11 +4,13 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 
 ![Bubble Level](docs/images/clinometer_bubble.jpg)
 
-![UTC](docs/images/clinometer_utc.jpg)
+![Date/Time](docs/images/clinometer_datetime.jpg)
 
 ![RA Dec](docs/images/clinometer_radec.jpg)
 
 ![Alt Az](docs/images/clinometer_altaz.jpg)
+
+![Battery](docs/images/clinometer_battery.jpg)
 
 ## What it does
 
