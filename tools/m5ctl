@@ -61,7 +61,7 @@ async def cmd_help(address: str, timeout: float) -> None:
         print(line)
 
 
-async def cmd_listen(address: str) -> None:
+async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
     """Subscribe to the response characteristic and print every notification."""
 
     def on_notify(_, data: bytearray) -> None:
@@ -70,6 +70,10 @@ async def cmd_listen(address: str) -> None:
     print(f"Listening on {address} — Ctrl+C to stop", file=sys.stderr)
     async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
         await client.start_notify(RESP_UUID, on_notify)
+        if stream_ms is not None:
+            period = max(100, stream_ms)
+            await client.write_gatt_char(
+                CMD_UUID, f"START_STREAM {period}".encode(), response=False)
         try:
             await asyncio.Future()  # run until cancelled
         except asyncio.CancelledError:
@@ -154,7 +158,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  m5ctl tilt
+  m5ctl tilt                # pitch and roll in degrees
+  m5ctl calibrate                             # zero at current orientation; prints ref vector
+  m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
+  m5ctl calibrate-reset                       # restore hardware reference
   m5ctl status
   m5ctl set-time-now                    # local time (default)
   m5ctl set-time-now --utc             # UTC
@@ -167,13 +174,13 @@ examples:
   m5ctl show-msg inf "Waiting for user"
   m5ctl show-msg-wait 30 M5 "Press M5 when ready"
   m5ctl cancel-msg
-  m5ctl stream 500         # enable streaming every 500 ms
+  m5ctl listen --stream 500   # stream tilt every 500 ms and print notifications
   m5ctl night-mode on      # enable red-only night mode
   m5ctl night-mode off     # restore normal colors
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2  # play a melody
   m5ctl help               # list all accepted BLE commands
-  m5ctl listen             # print all notifications (use after stream)
+  m5ctl listen             # print all notifications (events, screen changes…)
   m5ctl scan               # discover nearby BLE devices
         """,
     )
@@ -197,7 +204,12 @@ examples:
     # --- simple query commands ---
     sub.add_parser("help",        help="List all accepted BLE commands")
     sub.add_parser("ping",        help="Ping the device")
-    sub.add_parser("tilt",        help="Get current X/Y tilt angles")
+    sub.add_parser("tilt",        help="Get current pitch/roll angles")
+    p = sub.add_parser("calibrate",
+                       help="Calibrate from current orientation, or restore a saved reference vector")
+    p.add_argument("ref", nargs="*", metavar="FLOAT",
+                   help="Optional saved reference: gx gy gz from a previous CALIBRATE response")
+    sub.add_parser("calibrate-reset", help="Remove calibration and restore hardware reference")
     sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
     sub.add_parser("get-time",    help="Get current device time")
     sub.add_parser("get-radec",   help="Get stored RA/Dec values")
@@ -205,7 +217,9 @@ examples:
     sub.add_parser("get-msg",     help="Get current message state")
     sub.add_parser("cancel-msg",  help="Cancel the active message immediately")
     sub.add_parser("stop-stream", help="Disable tilt streaming")
-    sub.add_parser("listen",      help="Print all BLE notifications (Ctrl+C to stop)")
+    p = sub.add_parser("listen",   help="Print all BLE notifications (Ctrl+C to stop)")
+    p.add_argument("--stream", type=int, metavar="MS",
+                   help="Start tilt streaming at this period (ms) before listening")
     sub.add_parser("scan",        help="Scan for nearby BLE devices")
 
     # --- parameterised commands ---
@@ -258,10 +272,6 @@ examples:
     p.add_argument("buttons",  help="Button mask: M5  A  B  M5,A  ANY")
     p.add_argument("text",     help="Message text")
 
-    p = sub.add_parser("stream",
-                       help="Enable periodic tilt notifications (stream <period_ms>)")
-    p.add_argument("period_ms", type=int,
-                   help="Notification period in milliseconds (minimum 100)")
 
     p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
     p.add_argument("state", choices=["on", "off"], help="on or off")
@@ -284,6 +294,16 @@ examples:
             do_send(args, "PING")
         case "tilt":
             do_send(args, "GET_TILT")
+        case "calibrate":
+            if args.ref:
+                if len(args.ref) != 3:
+                    print("error: calibrate expects 0 or 3 floats (gx gy gz)", file=sys.stderr)
+                    sys.exit(1)
+                do_send(args, f"CALIBRATE {args.ref[0]} {args.ref[1]} {args.ref[2]}")
+            else:
+                do_send(args, "CALIBRATE")
+        case "calibrate-reset":
+            do_send(args, "CALIBRATE_RESET")
         case "status":
             do_send(args, "GET_STATUS")
         case "get-time":
@@ -338,15 +358,13 @@ examples:
         case "show-msg-wait":
             dur = "INF" if args.duration.lower() == "inf" else args.duration
             do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {args.text}")
-        case "stream":
-            do_send(args, f"START_STREAM {args.period_ms}")
         case "night-mode":
             do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
         case "beep":
             cmd = "BEEP " + " ".join(args.notes) if args.notes else "BEEP"
             do_send(args, cmd)
         case "listen":
-            run(cmd_listen(args.device))
+            run(cmd_listen(args.device, stream_ms=args.stream))
         case "scan":
             run(cmd_scan())
 

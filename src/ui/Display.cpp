@@ -38,6 +38,11 @@ void Display::update(const DeviceState& state) {
     _flush();
 }
 
+// Format a degree value into at most 6 characters: "+99.99" or "+100.0"
+static void fmtAngle(char* buf, size_t sz, float deg) {
+    snprintf(buf, sz, fabsf(deg) < 100.0f ? "%+.2f" : "%+.1f", deg);
+}
+
 // --- Screen renderers ---
 
 void Display::_drawClinometer(const DeviceState& state) {
@@ -66,9 +71,13 @@ void Display::_drawClinometer(const DeviceState& state) {
         return;
     }
 
-    // Bubble position (clamped to max radius)
-    int bx = cx + (int)(state.tiltYDeg * maxR / 3.0f);
-    int by = cy - (int)(state.tiltXDeg * maxR / 3.0f);
+    // Bubble position: use sin so the bubble re-centres at ±180° (upside-down level).
+    // Scale so sin(3°) == maxR, matching the concentric-circle graduations.
+    static const float kDeg2Rad  = 0.017453293f;
+    static const float kSin3     = 0.052335956f; // sinf(3°)
+    float bubbleScale = (float)maxR / kSin3;
+    int bx = cx + (int)(sinf(state.pitchDeg * kDeg2Rad) * bubbleScale);
+    int by = cy - (int)(sinf(state.rollDeg  * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;
@@ -77,21 +86,24 @@ void Display::_drawClinometer(const DeviceState& state) {
     _sprite->drawCircle(bx, by, dotR, _c(TFT_YELLOW, n));
 
     // Numeric readout — right panel
+    char abuf[8];
     int px = cx + maxR + 20;
     _sprite->setFont(&fonts::Font2);
     _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(px, _H *  8 / 135);
-    _sprite->print("X:");
+    _sprite->print("Pitch");
     _sprite->setFont(&fonts::Font4);
     _sprite->setCursor(px, _H * 22 / 135);
-    _sprite->printf("%+.2f", state.tiltXDeg);
+    fmtAngle(abuf, sizeof(abuf), state.pitchDeg);
+    _sprite->print(abuf);
 
     _sprite->setFont(&fonts::Font2);
     _sprite->setCursor(px, _H * 68 / 135);
-    _sprite->print("Y:");
+    _sprite->print("Roll");
     _sprite->setFont(&fonts::Font4);
     _sprite->setCursor(px, _H * 82 / 135);
-    _sprite->printf("%+.2f", state.tiltYDeg);
+    fmtAngle(abuf, sizeof(abuf), state.rollDeg);
+    _sprite->print(abuf);
 
     _sprite->setFont(&fonts::Font0);
     _sprite->setTextColor(_c(TFT_DARKGREY, n));

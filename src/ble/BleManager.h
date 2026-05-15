@@ -4,6 +4,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include "../model/DeviceState.h"
+#include "../imu/ImuManager.h"
 
 #define BLE_DEVICE_NAME  "M5-NexStar-Level"
 #define BLE_SERVICE_UUID "7d91b000-8f3b-4b63-b6a4-5d1e6b7a1000"
@@ -13,7 +14,7 @@
 
 class BleManager {
 public:
-    void begin(DeviceState* state);
+    void begin(DeviceState* state, ImuManager* imu);
     void update(DeviceState& state);
 
     void sendResponse(const char* msg);

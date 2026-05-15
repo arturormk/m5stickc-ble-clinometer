@@ -480,6 +480,114 @@ async def test_beep_bad_note_offset(device_addr):
 
 
 # ---------------------------------------------------------------------------
+# CALIBRATE / CALIBRATE_RESET
+# ---------------------------------------------------------------------------
+
+def _parse_calibrated(resp: str) -> tuple[float, float, float]:
+    """Parse 'CALIBRATED gx gy gz' and return the three floats."""
+    parts = resp.split()
+    assert parts[0] == "CALIBRATED" and len(parts) == 4, (
+        f"Unexpected CALIBRATE response: {resp!r}"
+    )
+    return float(parts[1]), float(parts[2]), float(parts[3])
+
+
+@pytest.mark.asyncio
+async def test_calibrate_response_format(device_addr):
+    """CALIBRATE returns CALIBRATED <gx> <gy> <gz> where the vector is unit length."""
+    async with BleSession(device_addr) as s:
+        await s.send("CALIBRATE_RESET")
+        resp = await s.send("CALIBRATE")
+    gx, gy, gz = _parse_calibrated(resp)
+    mag = (gx**2 + gy**2 + gz**2) ** 0.5
+    assert abs(mag - 1.0) < 0.01, f"Reference vector magnitude {mag:.4f} is not ~1"
+
+
+@pytest.mark.asyncio
+async def test_calibrate_tilt_near_zero(device_addr):
+    """GET_TILT should report near 0°/0° immediately after CALIBRATE."""
+    async with BleSession(device_addr) as s:
+        await s.send("CALIBRATE")
+        resp = await s.send("GET_TILT")
+    parts = resp.split()
+    pitch, roll = float(parts[1]), float(parts[2])
+    assert abs(pitch) < 2.0, f"Pitch {pitch:.2f}° not near zero after CALIBRATE"
+    assert abs(roll)  < 2.0, f"Roll  {roll:.2f}° not near zero after CALIBRATE"
+
+
+@pytest.mark.asyncio
+async def test_calibrate_reset_response(device_addr):
+    """CALIBRATE_RESET returns OK CALIBRATION_RESET."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("CALIBRATE_RESET")
+    assert resp == "OK CALIBRATION_RESET"
+
+
+@pytest.mark.asyncio
+async def test_calibrate_with_identity_vector(device_addr):
+    """CALIBRATE 0 0 1 sets the identity calibration and echoes (0, 0, 1)."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("CALIBRATE 0 0 1")
+    gx, gy, gz = _parse_calibrated(resp)
+    assert abs(gx)       < 0.001
+    assert abs(gy)       < 0.001
+    assert abs(gz - 1.0) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_calibrate_with_args_normalises(device_addr):
+    """CALIBRATE accepts an unnormalised vector and returns a unit vector."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("CALIBRATE 0 0 3")  # magnitude 3, direction (0,0,1)
+    gx, gy, gz = _parse_calibrated(resp)
+    mag = (gx**2 + gy**2 + gz**2) ** 0.5
+    assert abs(mag - 1.0) < 0.001
+    assert abs(gz - 1.0)  < 0.001
+
+
+@pytest.mark.asyncio
+async def test_calibrate_roundtrip(device_addr):
+    """Save the calibration vector, reset, restore — the vector is identical."""
+    async with BleSession(device_addr) as s:
+        first = await s.send("CALIBRATE")
+        await s.send("CALIBRATE_RESET")
+        gx, gy, gz = _parse_calibrated(first)
+        second = await s.send(f"CALIBRATE {gx:+.4f} {gy:+.4f} {gz:+.4f}")
+    assert first == second, (
+        f"Restored calibration {second!r} differs from original {first!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_calibrate_reset_clears_offset(device_addr):
+    """After CALIBRATE + CALIBRATE_RESET, CALIBRATE 0 0 1 restores (0, 0, 1)."""
+    async with BleSession(device_addr) as s:
+        await s.send("CALIBRATE")           # set some non-identity calibration
+        await s.send("CALIBRATE_RESET")     # clear it
+        resp = await s.send("CALIBRATE 0 0 1")
+    gx, gy, gz = _parse_calibrated(resp)
+    assert abs(gx)       < 0.001
+    assert abs(gy)       < 0.001
+    assert abs(gz - 1.0) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_calibrate_one_arg_rejected(device_addr):
+    """CALIBRATE with one float is rejected as ERR BAD_ARGS."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("CALIBRATE 0.5")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_calibrate_two_args_rejected(device_addr):
+    """CALIBRATE with two floats is rejected as ERR BAD_ARGS."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("CALIBRATE 0.5 0.5")
+    assert resp == "ERR BAD_ARGS"
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 

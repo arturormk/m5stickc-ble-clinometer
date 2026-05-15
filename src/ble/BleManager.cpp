@@ -1,4 +1,5 @@
 #include "BleManager.h"
+#include "../imu/ImuManager.h"
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
@@ -9,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 static DeviceState* s_state = nullptr;
+static ImuManager*  s_imu   = nullptr;
 static BLECharacteristic* s_pRespChar = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -182,6 +184,8 @@ class BleServerCallbacks : public BLEServerCallbacks {
 static const char* const kHelpLines[] = {
     "HELP PING",
     "HELP GET_TILT",
+    "HELP CALIBRATE [gx gy gz]",
+    "HELP CALIBRATE_RESET",
     "HELP GET_STATUS",
     "HELP GET_TIME",
     "HELP GET_RADEC",
@@ -242,7 +246,7 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
 
         } else if (strcasecmp(tok, "GET_TILT") == 0) {
             snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f",
-                     s_state->tiltXDeg, s_state->tiltYDeg);
+                     s_state->pitchDeg, s_state->rollDeg);
 
         } else if (strcasecmp(tok, "GET_STATUS") == 0) {
             buildStatusLine(*s_state, resp, sizeof(resp));
@@ -449,6 +453,29 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             s_state->melodyPending = true;
             strncpy(resp, "OK BEEP", sizeof(resp) - 1);
 
+        } else if (strcasecmp(tok, "CALIBRATE") == 0) {
+            float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+            char* sx = strtok_r(nullptr, " ", &saveptr);
+            if (sx) {
+                char* sy = strtok_r(nullptr, " ", &saveptr);
+                char* sz = sy ? strtok_r(nullptr, " ", &saveptr) : nullptr;
+                if (!sy || !sz) {
+                    strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                    goto respond;
+                }
+                if (s_imu) s_imu->calibrateFrom(strtof(sx, nullptr),
+                                                 strtof(sy, nullptr),
+                                                 strtof(sz, nullptr));
+                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+            } else {
+                if (s_imu) s_imu->calibrate(rgx, rgy, rgz);
+            }
+            snprintf(resp, sizeof(resp), "CALIBRATED %+.4f %+.4f %+.4f", rgx, rgy, rgz);
+
+        } else if (strcasecmp(tok, "CALIBRATE_RESET") == 0) {
+            if (s_imu) s_imu->resetCalibration();
+            strncpy(resp, "OK CALIBRATION_RESET", sizeof(resp) - 1);
+
         } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
             s_state->pendingBleHelpReady = true;
             return;
@@ -470,8 +497,9 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
 // BleManager
 // ---------------------------------------------------------------------------
 
-void BleManager::begin(DeviceState* state) {
+void BleManager::begin(DeviceState* state, ImuManager* imu) {
     s_state = state;
+    s_imu   = imu;
 
     // Ensure mktime interprets struct tm as UTC
     setenv("TZ", "UTC0", 1);
@@ -553,7 +581,7 @@ void BleManager::update(DeviceState& state) {
         if ((now - state.lastStreamMs) >= state.streamPeriodMs) {
             char buf[64];
             snprintf(buf, sizeof(buf), "TILT %+.2f %+.2f",
-                     state.tiltXDeg, state.tiltYDeg);
+                     state.pitchDeg, state.rollDeg);
             sendResponse(buf);
             state.lastStreamMs = now;
         }

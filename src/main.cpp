@@ -67,7 +67,7 @@ void setup() {
     g_buttons.begin();
     g_display.begin();
     g_imu.begin();
-    g_ble.begin(&g_state);
+    g_ble.begin(&g_state, &g_imu);
 }
 
 void loop() {

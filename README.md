@@ -67,7 +67,7 @@ The **M5 front button** cycles through screens in order:
 
 | # | Screen | Description |
 |---|---|---|
-| 0 | Clinometer | Bubble level with 1°/2°/3° rings, numeric X/Y tilt readout |
+| 0 | Clinometer | Bubble level with 1°/2°/3° rings, numeric Pitch/Roll readout |
 | 1 | Time | Current time (HH:MM:SS) — solar or sidereal — and date or label set via BLE |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
@@ -129,6 +129,8 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 → HELP
 ← HELP PING
 ← HELP GET_TILT
+← HELP CALIBRATE
+← HELP CALIBRATE_RESET
 ← HELP GET_STATUS
 ← HELP GET_TIME
 ← HELP GET_RADEC
@@ -166,14 +168,62 @@ Returns a liveness acknowledgement.
 
 ### `GET_TILT`
 
-Returns the current X (pitch) and Y (roll) tilt angles in decimal degrees.
+Returns the current **pitch** and **roll** angles in decimal degrees.
 
 ```
 → GET_TILT
 ← TILT +0.42 -1.17
 ```
 
-The sign convention follows the physical orientation of the device. Values update at ~15 Hz internally; the response reflects the most recent sample.
+The first value is **pitch** (inclination of the device's long axis from horizontal) and the second is **roll** (inclination of the short axis). Both are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping.
+
+**Axis mapping** is device-dependent and controlled at compile time:
+
+| Build environment | `IMU_LONG_AXIS_IS_Y` | Pitch formula | Roll formula |
+|---|---|---|---|
+| `m5stickc-plus2` | 1 | `atan2(ay, az)` | `atan2(-ax, az)` |
+| `m5stack-core2` / `m5stack-cores3` | 0 | `atan2(-ax, az)` | `atan2(ay, az)` |
+
+**Upside-down behaviour:** when the device is perfectly inverted and level (pitch/roll near ±180°) both values approach ±180°, correctly indicating that it is level but face-down. The on-screen bubble uses `sin(angle)` for its position so it smoothly re-centres at ±180° — the bubble sits at the centre of the circle whether the device is face-up or face-down level. The numeric display and this response always show the true angle.
+
+A calibration offset can be applied with `CALIBRATE` (see below). Values update at ~15 Hz internally; the response reflects the most recent filtered sample.
+
+---
+
+### `CALIBRATE [gx gy gz]`
+
+Without arguments, stores the current orientation as the pitch = 0, roll = 0 reference and returns the normalised reference gravity vector that encodes it:
+
+```
+→ CALIBRATE
+← CALIBRATED +0.0023 -0.0150 +0.9999
+```
+
+With three arguments, restores a previously saved reference vector directly — no need for the device to be in the calibrated orientation:
+
+```
+→ CALIBRATE +0.0023 -0.0150 +0.9999
+← CALIBRATED +0.0023 -0.0150 +0.9999
+```
+
+Both forms return the same `CALIBRATED gx gy gz` format, so the workflow for precalibration is:
+
+1. Position the device at the desired reference orientation.
+2. Send `CALIBRATE` and record the three numbers from the response.
+3. After any reboot, send `CALIBRATE <those three numbers>` to restore the same calibration instantly.
+
+Calibration is implemented as a 3×3 Rodrigues rotation matrix applied to the raw accelerometer vector before angle extraction. It works correctly for any starting orientation — not just small corrections. The calibration is held in RAM and is lost on reboot.
+
+---
+
+### `CALIBRATE_RESET`
+
+Removes the calibration and restores the hardware reference (device flat and face-up = 0°, 0°).
+
+```
+→ CALIBRATE_RESET
+← OK CALIBRATION_RESET
+```
 
 ---
 
@@ -396,7 +446,7 @@ Enables periodic tilt notifications on the Response characteristic. The device s
 ← OK STREAM 500
 ```
 
-Minimum period is 100 ms. Streaming continues until `STOP_STREAM` or disconnection.
+Minimum period is 100 ms. Streaming continues until `STOP_STREAM` or disconnection. Because streaming is tied to a connection, `START_STREAM` and the notification subscriber must be on the **same BLE connection** — use `m5ctl listen --stream <ms>` rather than separate `stream` and `listen` calls.
 
 ---
 
@@ -513,7 +563,7 @@ EVENT BUTTON B
 
 ### Streaming tilt
 
-When `START_STREAM` is active, periodic tilt notifications are sent in the same format as `GET_TILT`:
+When `START_STREAM` is active, periodic tilt notifications are sent in the same format as `GET_TILT` — first value pitch, second roll:
 
 ```
 TILT +0.38 -1.12
@@ -567,7 +617,9 @@ options:
 |---|---|---|
 | `help` | | List all accepted BLE commands |
 | `ping` | | Ping the device |
-| `tilt` | | Get current X/Y tilt angles |
+| `tilt` | | Get current pitch/roll angles |
+| `calibrate` | `[gx gy gz]` | Calibrate from current orientation (no args) or restore a saved reference vector |
+| `calibrate-reset` | | Remove calibration and restore hardware reference |
 | `status` | | Get device status (screen, BLE, battery, stream, night mode) |
 | `get-time` | | Get current device time |
 | `get-radec` | | Get stored RA/Dec values |
@@ -581,11 +633,10 @@ options:
 | `show-msg` | `<seconds\|inf> <text>` | Display a timed or persistent message |
 | `show-msg-wait` | `<seconds\|inf> <buttons> <text>` | Display a message and watch for a button press |
 | `cancel-msg` | | Cancel the active message immediately |
-| `stream` | `<period_ms>` | Enable periodic tilt notifications |
+| `listen` | `[--stream <ms>]` | Print all BLE notifications; `--stream <ms>` also starts tilt streaming on the same connection |
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
 | `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
-| `listen` | | Print all BLE notifications (Ctrl+C to stop) |
 | `scan` | | Scan for nearby BLE devices |
 
 Examples:
@@ -607,7 +658,7 @@ uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
 uv run tools/m5ctl beep
 uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
-uv run tools/m5ctl stream 500
+uv run tools/m5ctl listen --stream 500
 uv run tools/m5ctl listen
 ```
 
@@ -672,7 +723,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   └── DeviceState.h  Shared state struct accessed by all modules
 │   ├── imu/
 │   │   ├── ImuManager.h
-│   │   └── ImuManager.cpp Tilt sampling at ~15 Hz, exponential low-pass filter
+│   │   └── ImuManager.cpp Pitch/Roll sampling at ~15 Hz; atan2 full-range formula, Rodrigues calibration matrix
 │   ├── ble/
 │   │   ├── BleManager.h
 │   │   └── BleManager.cpp GATT server, command parser, response/event notify
