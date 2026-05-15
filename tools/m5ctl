@@ -35,6 +35,32 @@ async def send_and_receive(address: str, command: str, timeout: float) -> str:
             sys.exit(1)
 
 
+async def cmd_help(address: str, timeout: float) -> None:
+    """Send HELP and collect all response lines until the HELP OK sentinel."""
+    lines: list[str] = []
+    loop = asyncio.get_running_loop()
+    done: "asyncio.Future[None]" = loop.create_future()
+
+    def on_notify(_, data: bytearray) -> None:
+        text = data.decode("utf-8", errors="replace").strip()
+        if text == "HELP OK":
+            if not done.done():
+                done.set_result(None)
+        else:
+            lines.append(text)
+
+    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+        await client.start_notify(RESP_UUID, on_notify)
+        await client.write_gatt_char(CMD_UUID, b"HELP", response=False)
+        try:
+            await asyncio.wait_for(asyncio.shield(done), timeout=timeout)
+        except asyncio.TimeoutError:
+            print(f"error: no response within {timeout}s", file=sys.stderr)
+            sys.exit(1)
+    for line in lines:
+        print(line)
+
+
 async def cmd_listen(address: str) -> None:
     """Subscribe to the response characteristic and print every notification."""
 
@@ -146,6 +172,7 @@ examples:
   m5ctl night-mode off     # restore normal colors
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2  # play a melody
+  m5ctl help               # list all accepted BLE commands
   m5ctl listen             # print all notifications (use after stream)
   m5ctl scan               # discover nearby BLE devices
         """,
@@ -168,6 +195,7 @@ examples:
     sub.required = True
 
     # --- simple query commands ---
+    sub.add_parser("help",        help="List all accepted BLE commands")
     sub.add_parser("ping",        help="Ping the device")
     sub.add_parser("tilt",        help="Get current X/Y tilt angles")
     sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
@@ -250,6 +278,8 @@ examples:
     args = parser.parse_args()
 
     match args.cmd:
+        case "help":
+            run(cmd_help(args.device, args.timeout))
         case "ping":
             do_send(args, "PING")
         case "tilt":

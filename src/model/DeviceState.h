@@ -68,6 +68,7 @@ struct DeviceState {
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];
     volatile bool pendingBleEventReady;
+    volatile bool pendingBleHelpReady;
     volatile bool bleClientWantsNewline;
 };
 

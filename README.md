@@ -121,6 +121,38 @@ Subscribe to notifications on the **Response** characteristic to receive replies
 
 ## BLE Commands
 
+### `HELP`
+
+Returns a concise list of all accepted commands. The device sends one notify packet per command line, each prefixed with `HELP `, followed by a `HELP OK` sentinel that signals the list is complete.
+
+```
+→ HELP
+← HELP PING
+← HELP GET_TILT
+← HELP GET_STATUS
+← HELP GET_TIME
+← HELP GET_RADEC
+← HELP GET_ALTAZ
+← HELP GET_MSG
+← HELP SET_TIME <ISO8601> [<tz>]
+← HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]
+← HELP SET_RADEC <ra> <dec>
+← HELP SET_ALTAZ <alt> <az>
+← HELP SHOW_MSG <dur> <text...>
+← HELP SHOW_MSG_WAIT <dur> <btns> <text...>
+← HELP CANCEL_MSG
+← HELP START_STREAM <ms>
+← HELP STOP_STREAM
+← HELP SET_NIGHT_MODE ON|OFF
+← HELP BEEP [<notes...>]
+← HELP HELP
+← HELP OK
+```
+
+Clients should subscribe to notifications and collect packets until they receive `HELP OK`. `?` is accepted as a synonym.
+
+---
+
 ### `PING`
 
 Returns a liveness acknowledgement.
@@ -533,6 +565,7 @@ options:
 
 | Command | Arguments | Description |
 |---|---|---|
+| `help` | | List all accepted BLE commands |
 | `ping` | | Ping the device |
 | `tilt` | | Get current X/Y tilt angles |
 | `status` | | Get device status (screen, BLE, battery, stream, night mode) |
@@ -558,6 +591,7 @@ options:
 Examples:
 
 ```bash
+uv run tools/m5ctl help
 uv run tools/m5ctl tilt
 uv run tools/m5ctl status
 uv run tools/m5ctl set-time-now

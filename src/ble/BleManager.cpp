@@ -179,6 +179,29 @@ class BleServerCallbacks : public BLEServerCallbacks {
 // Command characteristic callbacks — runs on BLE FreeRTOS task
 // ---------------------------------------------------------------------------
 
+static const char* const kHelpLines[] = {
+    "HELP PING",
+    "HELP GET_TILT",
+    "HELP GET_STATUS",
+    "HELP GET_TIME",
+    "HELP GET_RADEC",
+    "HELP GET_ALTAZ",
+    "HELP GET_MSG",
+    "HELP SET_TIME <ISO8601> [<tz>]",
+    "HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]",
+    "HELP SET_RADEC <ra> <dec>",
+    "HELP SET_ALTAZ <alt> <az>",
+    "HELP SHOW_MSG <dur> <text...>",
+    "HELP SHOW_MSG_WAIT <dur> <btns> <text...>",
+    "HELP CANCEL_MSG",
+    "HELP START_STREAM <ms>",
+    "HELP STOP_STREAM",
+    "HELP SET_NIGHT_MODE ON|OFF",
+    "HELP BEEP [<notes...>]",
+    "HELP HELP",
+};
+static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
+
 class BleCmdCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) override {
         if (!s_state) return;
@@ -426,6 +449,10 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             s_state->melodyPending = true;
             strncpy(resp, "OK BEEP", sizeof(resp) - 1);
 
+        } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
+            s_state->pendingBleHelpReady = true;
+            return;
+
         } else {
             strncpy(resp, "ERR UNKNOWN_COMMAND", sizeof(resp) - 1);
         }
@@ -494,6 +521,14 @@ void BleManager::update(DeviceState& state) {
     if (state.pendingBleResponseReady) {
         sendResponse((const char*)state.pendingBleResponse);
         state.pendingBleResponseReady = false;
+    }
+
+    // Drain pending HELP response (one burst of notifications)
+    if (state.pendingBleHelpReady) {
+        for (int i = 0; i < kHelpLineCount; i++)
+            sendResponse(kHelpLines[i]);
+        sendResponse("HELP OK");
+        state.pendingBleHelpReady = false;
     }
 
     // Drain pending button event
