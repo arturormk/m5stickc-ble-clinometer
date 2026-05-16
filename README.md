@@ -145,8 +145,10 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]
 ← HELP SET_RADEC <ra> <dec>
 ← HELP SET_ALTAZ <alt> <az>
-← HELP SHOW_MSG <dur> <text...>
-← HELP SHOW_MSG_WAIT <dur> <btns> <text...>
+← HELP SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
+← HELP SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
+←   FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24
+←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK
 ← HELP CANCEL_MSG
 ← HELP START_STREAM <ms>
 ← HELP STOP_STREAM
@@ -383,13 +385,16 @@ Both values are decimal degrees. Values are stored as display strings.
 
 ---
 
-### `SHOW_MSG <duration> <text>`
+### `SHOW_MSG <duration> [FONT:<n>] [BEEP] <text>`
 
 Displays a message on the full-screen message overlay.
 
 ```
 → SHOW_MSG 5 Moving altitude axis
 → SHOW_MSG INF Waiting for solar centering
+→ SHOW_MSG 10 FONT:5 Slewing to α Centauri
+→ SHOW_MSG 3 BEEP Alignment complete
+→ SHOW_MSG INF FONT:6 BEEP ¡Atención!
 ← OK MSG
 ← ERR BAD_ARGS
 ```
@@ -401,9 +406,28 @@ Displays a message on the full-screen message overlay.
 
 The device switches to the message screen immediately and returns to the previous screen when the message expires or is cancelled. BLE and IMU continue running in the background.
 
+`FONT:<n>` and `BEEP` are optional tokens parsed from the front of the text field; once a token does not match either keyword, all remaining text (including that token) becomes the message body. This means the message body itself must not begin with `FONT:` or the word `BEEP` unless those are intended to be consumed as options.
+
+`BEEP` triggers an immediate short attention tone (880 Hz, 200 ms) when the message appears. For a custom melody, send a separate `BEEP` command before or after `SHOW_MSG`.
+
+#### Font codes
+
+| Code | Font | Approx. height | Character coverage |
+|------|------|----------------|--------------------|
+| 1 | `Font2` (Bodmer BMPfont) | ~7 px | ASCII 0x20–0x7E only |
+| 2 | `Font4` (Bodmer BMPfont) — **default** | ~14 px | ASCII 0x20–0x7E only |
+| 3 | `DejaVu18` (Adafruit GFX) | ~18 px | ASCII 0x20–0x7E only |
+| 4 | `DejaVu24` (Adafruit GFX) | ~24 px | ASCII 0x20–0x7E only |
+| 5 | `lgfxJapanGothic_16` (U8g2) | 16 px | Full Unicode incl. Latin-1 extended (é, ü, ñ …) |
+| 6 | `lgfxJapanGothic_24` (U8g2) | 24 px | Full Unicode incl. Latin-1 extended (é, ü, ñ …) |
+
+Fonts 1–4 are bitmap or proportional sans-serif fonts that cover standard ASCII printable characters only. Accented letters, currency symbols (€, £), and other characters above U+007E will not render with those fonts — use code 5 or 6 instead. `lgfxJapanGothic` is a U8g2 Unicode font that also handles CJK characters.
+
+The default (no `FONT:` token, or `FONT:0` / `FONT:2`) is `Font4`, which is noticeably larger than the original `Font2` used before this feature was added.
+
 ---
 
-### `SHOW_MSG_WAIT <duration> <buttons> <text>`
+### `SHOW_MSG_WAIT <duration> <buttons> [FONT:<n>] [BEEP] <text>`
 
 Displays a message and registers interest in one or more button presses. When a watched button is pressed, the device sends an `EVENT BUTTON <x>` notification.
 
@@ -411,6 +435,7 @@ Displays a message and registers interest in one or more button presses. When a 
 → SHOW_MSG_WAIT 30 M5 Press M5 when ready
 → SHOW_MSG_WAIT INF M5,A Confirm or abort
 → SHOW_MSG_WAIT 15 ANY Press any button to stop
+→ SHOW_MSG_WAIT INF M5 FONT:5 BEEP ¿Continuar?
 ← OK MSG_WAIT
 ← ERR BAD_ARGS
 ```
@@ -425,7 +450,7 @@ Displays a message and registers interest in one or more button presses. When a 
 | `M5,A` | Comma-separated combination |
 | `ANY` | Any of the three buttons |
 
-The message remains visible after a button press until its timeout expires or `CANCEL_MSG` is received. Multiple button events can be generated if the user presses the button more than once.
+`FONT:<n>` and `BEEP` work identically to `SHOW_MSG` — see the font code table above. The message remains visible after a button press until its timeout expires or `CANCEL_MSG` is received. Multiple button events can be generated if the user presses the button more than once.
 
 ---
 
@@ -636,8 +661,8 @@ options:
 | `set-sidereal-now` | `--longitude DEG [--dut1 SEC] [--label STR] [--offset N]` | Set device to current Local Sidereal Time |
 | `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
 | `set-altaz` | `<alt> <az>` | Set Alt/Az display values |
-| `show-msg` | `<seconds\|inf> <text>` | Display a timed or persistent message |
-| `show-msg-wait` | `<seconds\|inf> <buttons> <text>` | Display a message and watch for a button press |
+| `show-msg` | `<seconds\|inf> [FONT:<n>] [BEEP] <text>` | Display a timed or persistent message; optional font code and/or beep |
+| `show-msg-wait` | `<seconds\|inf> <buttons> [FONT:<n>] [BEEP] <text>` | Display a message and watch for a button press |
 | `cancel-msg` | | Cancel the active message immediately |
 | `listen` | `[--stream <ms>]` | Print all BLE notifications; `--stream <ms>` also starts tilt streaming on the same connection |
 | `stop-stream` | | Disable tilt streaming |

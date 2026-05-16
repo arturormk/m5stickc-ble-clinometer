@@ -215,6 +215,22 @@ void Display::_drawAltAz(const DeviceState& state) {
     _sprite->print(state.azText);
 }
 
+// Font coverage:
+//   Font2, Font4, DejaVu*: ASCII 0x20-0x7E only — no accented characters.
+//   Font6/Font8 are 7-segment digit-only glyphs; do not use for text.
+//   lgfxJapanGothic (U8g2) covers full Unicode including Latin-1 extended
+//   (é, ü, ñ …) — use codes 5 or 6 whenever accented characters are needed.
+static const lgfx::IFont* _msgFont(uint8_t code) {
+    switch (code) {
+        case 1:  return &fonts::Font2;              //  ~7 px, ASCII only
+        case 3:  return &fonts::DejaVu18;           // ~18 px, ASCII only
+        case 4:  return &fonts::DejaVu24;           // ~24 px, ASCII only
+        case 5:  return &fonts::lgfxJapanGothic_16; //  16 px, Unicode (Latin-1 accents OK)
+        case 6:  return &fonts::lgfxJapanGothic_24; //  24 px, Unicode (Latin-1 accents OK)
+        default: return &fonts::Font4;              // ~14 px, ASCII only (codes 0, 2, unknown)
+    }
+}
+
 void Display::_drawMessage(const DeviceState& state) {
     if (!state.messageActive) return;
     bool n = state.nightMode;
@@ -235,43 +251,39 @@ void Display::_drawMessage(const DeviceState& state) {
         _sprite->setTextDatum(textdatum_t::top_left);
     }
 
-    // Font2 char width ≈ 8px; leave ~2-char margin each side
-    const int LINE_LEN = (_W / 8) - 2;
-    const int LINE_H   = _H * 18 / 135;
-    const int startY   = _H * 20 / 135;
+    _sprite->setFont(_msgFont(state.messageFontCode));
+    const int lineH   = _sprite->fontHeight() + 2;
+    const int maxW    = _W - 8;  // 4 px margin each side
+    const int startY  = _H * 20 / 135;
+    const int bottomY = (state.messageAwaitButtons != 0) ? (_H - lineH - 2) : (_H - 2);
 
-    _sprite->setFont(&fonts::Font2);
     _sprite->setTextColor(_c(TFT_WHITE, n));
 
     const char* p = state.messageText;
-    int len = strlen(p);
     int y = startY;
-    const int bottomLimit = _H - LINE_H;
 
-    while (*p && y < bottomLimit) {
-        char line[64];
-        int take = 0;
+    while (*p && y + lineH <= bottomY) {
+        char line[128] = "";
+        while (*p) {
+            const char* wEnd = p;
+            while (*wEnd && *wEnd != ' ') wEnd++;
 
-        if (len <= LINE_LEN) {
-            take = len;
-        } else {
-            take = LINE_LEN;
-            int back = take;
-            while (back > 0 && p[back] != ' ') back--;
-            if (back > 0) take = back;
+            char cand[128];
+            if (line[0] == '\0')
+                snprintf(cand, sizeof(cand), "%.*s", (int)(wEnd - p), p);
+            else
+                snprintf(cand, sizeof(cand), "%s %.*s", line, (int)(wEnd - p), p);
+
+            // If candidate overflows and we already have something, stop here
+            if (_sprite->textWidth(cand) > maxW && line[0] != '\0') break;
+
+            strncpy(line, cand, sizeof(line) - 1);
+            p = wEnd;
+            if (*p == ' ') p++;
         }
-
-        int safeTake = take < 63 ? take : 63;
-        strncpy(line, p, safeTake);
-        line[safeTake] = '\0';
-
         _sprite->setTextDatum(textdatum_t::top_center);
         _sprite->drawString(line, _W / 2, y);
-
-        p += take;
-        len -= take;
-        if (*p == ' ') { p++; len--; }
-        y += LINE_H;
+        y += lineH;
     }
     _sprite->setTextDatum(textdatum_t::top_left);
 

@@ -354,6 +354,150 @@ async def test_show_msg_wait_while_active_preserves_prev_screen(device_addr):
 
 
 # ---------------------------------------------------------------------------
+# SHOW_MSG / SHOW_MSG_WAIT — FONT and BEEP options
+# ---------------------------------------------------------------------------
+
+def _msg_text(resp: str) -> str:
+    """Extract the body stored in a GET_MSG response (everything after TEXT=)."""
+    _, _, tail = resp.partition("TEXT=")
+    return tail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("font_code", [1, 2, 3, 4, 5, 6])
+async def test_show_msg_font_code_accepted(device_addr, font_code):
+    """FONT:<n> is consumed; the body in GET_MSG excludes the option token."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SHOW_MSG 10 FONT:{font_code} Font test")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Font test"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_font_unknown_code_accepted(device_addr):
+    """An unrecognised FONT: code (e.g. FONT:99) falls to the default without error."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 FONT:99 Unknown font code")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Unknown font code"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_font_case_insensitive(device_addr):
+    """The FONT: keyword is matched case-insensitively."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 font:3 Lowercase font keyword")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Lowercase font keyword"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_beep_option_accepted(device_addr):
+    """BEEP at the front of the text field is consumed; body is stored correctly."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 BEEP Alert now")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Alert now"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_beep_case_insensitive(device_addr):
+    """The BEEP keyword is matched case-insensitively."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 beep Lowercase beep keyword")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Lowercase beep keyword"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_font_then_beep(device_addr):
+    """FONT:<n> followed by BEEP: both consumed, text body is correct."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 FONT:3 BEEP Warning message")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Warning message"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_beep_then_font(device_addr):
+    """BEEP followed by FONT:<n>: options may appear in either order."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 BEEP FONT:5 Reversed order")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Reversed order"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_beep_mid_body_preserved(device_addr):
+    """The word BEEP in the body (not at the very start) is kept as plain text."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 Ignore BEEP sound")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Ignore BEEP sound"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_no_options_body_unchanged(device_addr):
+    """A command with no FONT or BEEP tokens stores the whole text verbatim."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG 10 Plain message text")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Plain message text"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("font_code", [1, 2, 3, 4, 5, 6])
+async def test_show_msg_wait_font_code_accepted(device_addr, font_code):
+    """FONT:<n> in SHOW_MSG_WAIT is consumed; the stored body excludes the token."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SHOW_MSG_WAIT 10 M5 FONT:{font_code} Wait font test")
+        assert resp == "OK MSG_WAIT"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Wait font test"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_wait_beep_option_accepted(device_addr):
+    """BEEP in SHOW_MSG_WAIT is consumed; body is stored correctly."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG_WAIT 10 M5 BEEP Press to confirm")
+        assert resp == "OK MSG_WAIT"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Press to confirm"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_wait_font_and_beep_combined(device_addr):
+    """FONT:<n> and BEEP together in SHOW_MSG_WAIT; text body is correct."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG_WAIT INF ANY FONT:6 BEEP Ready?")
+        assert resp == "OK MSG_WAIT"
+        get = await s.send("GET_MSG")
+        assert _msg_text(get) == "Ready?"
+        await s.send("CANCEL_MSG")
+
+
+# ---------------------------------------------------------------------------
 # START_STREAM / STOP_STREAM
 # ---------------------------------------------------------------------------
 

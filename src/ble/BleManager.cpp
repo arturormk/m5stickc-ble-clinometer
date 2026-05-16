@@ -195,8 +195,10 @@ static const char* const kHelpLines[] = {
     "HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]",
     "HELP SET_RADEC <ra> <dec>",
     "HELP SET_ALTAZ <alt> <az>",
-    "HELP SHOW_MSG <dur> <text...>",
-    "HELP SHOW_MSG_WAIT <dur> <btns> <text...>",
+    "HELP SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
+    "HELP SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>",
+    "HELP  FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24",
+    "HELP  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK",
     "HELP CANCEL_MSG",
     "HELP START_STREAM <ms>",
     "HELP STOP_STREAM",
@@ -364,8 +366,31 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             // Everything remaining after duration is the message text
             char* text = strtok_r(nullptr, "", &saveptr);
             if (!dur || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            // Skip leading space in text
             while (*text == ' ') text++;
+            {
+                uint8_t fontCode = 0;
+                bool beep = false;
+                while (*text) {
+                    if (strncasecmp(text, "FONT:", 5) == 0) {
+                        fontCode = (uint8_t)atoi(text + 5);
+                        while (*text && *text != ' ') text++;
+                        while (*text == ' ') text++;
+                    } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
+                        beep = true;
+                        text += 4;
+                        while (*text == ' ') text++;
+                    } else {
+                        break;
+                    }
+                }
+                s_state->messageFontCode = fontCode;
+                if (beep) {
+                    s_state->melodyNotes[0].freqHz = 880;
+                    s_state->melodyNotes[0].durMs  = 200;
+                    s_state->melodyPendingLength   = 1;
+                    s_state->melodyPending         = true;
+                }
+            }
             strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
             s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
             s_state->messageAwaitButtons = 0;
@@ -389,6 +414,30 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             char* text = strtok_r(nullptr, "", &saveptr);
             if (!dur || !btns || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
             while (*text == ' ') text++;
+            {
+                uint8_t fontCode = 0;
+                bool beep = false;
+                while (*text) {
+                    if (strncasecmp(text, "FONT:", 5) == 0) {
+                        fontCode = (uint8_t)atoi(text + 5);
+                        while (*text && *text != ' ') text++;
+                        while (*text == ' ') text++;
+                    } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
+                        beep = true;
+                        text += 4;
+                        while (*text == ' ') text++;
+                    } else {
+                        break;
+                    }
+                }
+                s_state->messageFontCode = fontCode;
+                if (beep) {
+                    s_state->melodyNotes[0].freqHz = 880;
+                    s_state->melodyNotes[0].durMs  = 200;
+                    s_state->melodyPendingLength   = 1;
+                    s_state->melodyPending         = true;
+                }
+            }
             strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
             s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
             s_state->messageAwaitButtons = parseMsgButtons(btns);
