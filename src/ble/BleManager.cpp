@@ -1,5 +1,6 @@
 #include "BleManager.h"
 #include "../imu/ImuManager.h"
+#include <M5Unified.h>
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
@@ -331,6 +332,11 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 s_state->siderealMode    = false;
                 strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
                 s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+                if (M5.Rtc.isEnabled()) {
+                    struct tm utc;
+                    gmtime_r(&t, &utc);
+                    M5.Rtc.setDateTime(&utc);
+                }
                 strncpy(resp, "OK TIME", sizeof(resp) - 1);
             }
 
@@ -563,6 +569,27 @@ void BleManager::begin(DeviceState* state, ImuManager* imu) {
     // Ensure mktime interprets struct tm as UTC
     setenv("TZ", "UTC0", 1);
     tzset();
+
+    // Restore time from RTC across power cycles (guard against never-set default ~2000-01-01)
+    if (M5.Rtc.isEnabled() && !M5.Rtc.getVoltLow()) {
+        m5::rtc_datetime_t dt;
+        if (M5.Rtc.getDateTime(&dt) && dt.date.year >= 2020) {
+            struct tm utc = {};
+            utc.tm_year  = dt.date.year - 1900;
+            utc.tm_mon   = dt.date.month - 1;
+            utc.tm_mday  = dt.date.date;
+            utc.tm_hour  = dt.time.hours;
+            utc.tm_min   = dt.time.minutes;
+            utc.tm_sec   = dt.time.seconds;
+            utc.tm_isdst = 0;
+            time_t t = mktime(&utc);
+            if (t > 0) {
+                s_state->timeEpochSec    = t;
+                s_state->timeSetAtMillis = millis();
+                s_state->siderealMode    = false;
+            }
+        }
+    }
 
     BLEDevice::setMTU(185);
     BLEDevice::init(BLE_DEVICE_NAME);

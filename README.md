@@ -20,6 +20,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
+- **Persists time across power cycles** — `SET_TIME` writes the UTC time to the on-board PCF8563 RTC chip; on the next boot the device restores the clock automatically without needing a BLE reconnect
 
 ## Hardware
 
@@ -327,6 +328,8 @@ Sets the device clock. The device ticks locally from this point.
 ```
 
 The datetime part is always `YYYY-MM-DDTHH:MM:SS` and is stored at face value — the device performs no UTC conversion. The optional timezone label is display-only: it appears on the time screen below the date and is not interpreted by the firmware.
+
+The time is also written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and restores the clock automatically, so `SET_TIME` does not need to be re-issued after a reboot. The timezone label is not stored in the RTC and is not restored on boot. `SET_SIDEREAL_TIME` does not write to the RTC — sidereal time differs from solar time and has no calendar date.
 
 | Suffix | Label shown | Example |
 |---|---|---|
