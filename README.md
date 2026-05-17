@@ -84,7 +84,7 @@ The display auto-rotates 180° based on the raw IMU gravity reading. When the sc
 | Button | Short press | Long press (≥2 s) |
 |---|---|---|
 | M5 (front) | Cycle to next screen | — |
-| Top (side) | Reboot | Power off (AXP192 shutdown) |
+| Top (side) | Reboot | Play shutdown melody, then power off (AXP192 shutdown) |
 | Power (reserved) | — | — |
 
 When a `SHOW_MSG_WAIT` message is active, pressing the M5 button (if it is in the watch list) sends a `EVENT BUTTON M5` notification over BLE instead of cycling screens.
@@ -812,7 +812,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering; sprites are allocated at **8-bit (palette) colour depth** so the full-screen buffer fits in internal SRAM on all supported display sizes — a 320×240 sprite at 16-bit would require ~150 KB, which cannot be allocated alongside the BLE stack on the ESP32; at 8-bit it drops to ~75 KB. All standard colours (black, white, red, green, yellow, grey variants) map exactly or near-exactly to the 216-entry web-safe palette used in this mode. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
-- All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick.
+- All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable there since the device is about to power off).
 - Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.
 
 ---
