@@ -3,7 +3,7 @@
 #include <time.h>
 
 void Display::begin() {
-    M5.Display.setRotation(3);
+    M5.Display.setRotation(1);
     M5.Display.setBrightness(128);
     _W = M5.Display.width();
     _H = M5.Display.height();
@@ -23,15 +23,22 @@ void Display::update(const DeviceState& state) {
     if ((now - _lastRefreshMs) < interval) return;
     _lastRefreshMs = now;
 
-    // Auto-rotate 180° when screen "up" (X axis) drifts away from world up.
-    // Hysteresis at ±0.3 g prevents flicker near the transition.
+    // Auto-rotate 180° based on gravity. Hysteresis at ±0.3 g prevents flicker.
+    // M5StickC Plus 2 (IMU_LONG_AXIS_IS_Y=1): long axis is Y, so gravX signals
+    // which end is up. Other devices (IMU_LONG_AXIS_IS_Y=0): long axis is X, so
+    // gravY signals orientation.
     if (state.imuAvailable) {
-        if (!_screenFlipped && state.gravX > 0.3f) {
+#if IMU_LONG_AXIS_IS_Y
+        float flipSensor = state.gravX;
+#else
+        float flipSensor = state.gravY;
+#endif
+        if (!_screenFlipped && flipSensor < -0.3f) {
             _screenFlipped = true;
-            M5.Display.setRotation(1);
-        } else if (_screenFlipped && state.gravX < -0.3f) {
-            _screenFlipped = false;
             M5.Display.setRotation(3);
+        } else if (_screenFlipped && flipSensor > 0.3f) {
+            _screenFlipped = false;
+            M5.Display.setRotation(1);
         }
     }
 
