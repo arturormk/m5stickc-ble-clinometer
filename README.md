@@ -183,14 +183,14 @@ Returns the current **pitch** and **roll** angles in decimal degrees.
 ← TILT +0.42 -1.17
 ```
 
-The first value is **pitch** (inclination of the device's long axis from horizontal) and the second is **roll** (inclination of the short axis). Both are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping.
+The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis) and the second is **roll** (side tilt — rotation around the short axis). Both are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping.
 
 **Axis mapping** is device-dependent and controlled at compile time:
 
 | Build environment | `IMU_LONG_AXIS_IS_Y` | Pitch formula | Roll formula |
 |---|---|---|---|
-| `m5stickc-plus2` | 1 | `atan2(ay, az)` | `atan2(-ax, az)` |
-| `m5stack-core2` / `m5stack-cores3` | 0 | `atan2(-ax, az)` | `atan2(ay, az)` |
+| `m5stickc-plus2` | 1 | `atan2(-ax, az)` | `atan2(ay, az)` |
+| `m5stack-core2` / `m5stack-cores3` | 0 | `atan2(ay, az)` | `atan2(-ax, az)` |
 
 **Upside-down behaviour:** when the device is perfectly inverted and level (pitch/roll near ±180°) both values approach ±180°, correctly indicating that it is level but face-down. The on-screen bubble uses `sin(angle)` for its position so it smoothly re-centres at ±180° — the bubble sits at the centre of the circle whether the device is face-up or face-down level. The numeric display and this response always show the true angle.
 

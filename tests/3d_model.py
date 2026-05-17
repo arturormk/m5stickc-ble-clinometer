@@ -93,8 +93,7 @@ class BleWorker:
 
     def stop(self) -> None:
         self._stop.set()
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=3.0)
+        self._thread.join(timeout=5.0)
 
     def _thread_main(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -281,11 +280,11 @@ class Renderer:
         # axis back toward vertical (harder to see orientation).
         gluLookAt(6.5, -3.0, 5.0,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Apply device orientation: pitch around X, then roll around Y.
-        # Firmware: roll=atan2(-gcx,gcz) gives positive roll when +X tilts down,
+        # Apply device orientation: pitch around Y, then roll around X.
+        # Firmware: pitch=atan2(-gcx,gcz) gives positive pitch when +X tilts down,
         # which is exactly a positive RHR rotation about +Y — no sign flip needed.
-        glRotatef(pitch, 1.0, 0.0, 0.0)
-        glRotatef(roll,  0.0, 1.0, 0.0)
+        glRotatef(-pitch, 0.0, 1.0, 0.0)
+        glRotatef(-roll,  1.0, 0.0, 0.0)
 
         draw_box(model)
         draw_axes(model)
@@ -293,8 +292,8 @@ class Renderer:
         # Gravity components in device frame reconstructed from pitch/roll
         P = math.radians(pitch)
         R = math.radians(roll)
-        gx = -math.sin(R) * math.cos(P)
-        gy =  math.sin(P)
+        gx = -math.sin(P) * math.cos(R)
+        gy =  math.sin(R) * math.cos(P)
         gz =  math.cos(P) * math.cos(R)
 
         if demo:

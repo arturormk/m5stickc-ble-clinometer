@@ -96,8 +96,8 @@ void Display::_drawClinometer(const DeviceState& state) {
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
-    int bx = cx + (int)(sinf(state.pitchDeg * kDeg2Rad) * bubbleScale);
-    int by = cy - (int)(sinf(state.rollDeg  * kDeg2Rad) * bubbleScale);
+    int bx = cx - (int)(sinf(state.rollDeg  * kDeg2Rad) * bubbleScale);
+    int by = cy + (int)(sinf(state.pitchDeg * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;

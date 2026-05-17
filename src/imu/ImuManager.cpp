@@ -58,17 +58,16 @@ void ImuManager::update(DeviceState& state) {
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
 
     // Device-dependent axis mapping.
-    // Pitch = inclination of the long axis; Roll = inclination of the short axis.
-    // Tilting the long axis changes the accelerometer component perpendicular to it
-    // (rotation around the short axis), so:
-    //   IMU_LONG_AXIS_IS_Y=1 (M5StickC): long=Y → tipping long axis changes ay (gcy)
-    //   IMU_LONG_AXIS_IS_Y=0 (Core2 etc): long=X → tipping long axis changes ax (gcx)
+    // Pitch = tilting the screen toward/away from you (rotation around the long axis).
+    // Roll  = side tilt (rotation around the short axis).
+    //   IMU_LONG_AXIS_IS_Y=1 (M5StickC): long=Y → rotate around Y changes gcx → pitch from gcx
+    //   IMU_LONG_AXIS_IS_Y=0 (Core2 etc): long=X → rotate around X changes gcy → pitch from gcy
 #if IMU_LONG_AXIS_IS_Y
-    state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
-    state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
-#else
     state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
     state.rollDeg  = atan2f( gcy, gcz) * 57.2957795f;
+#else
+    state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
+    state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
 #endif
 
     state.tiltTimestampMs = now;
