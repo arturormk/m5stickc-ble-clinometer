@@ -8,6 +8,7 @@ void Display::begin() {
     _W = M5.Display.width();
     _H = M5.Display.height();
     _sprite = new LGFX_Sprite(&M5.Display);
+    _sprite->setColorDepth(8);
     _sprite->createSprite(_W, _H);
 }
 
