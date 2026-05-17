@@ -182,29 +182,29 @@ class BleServerCallbacks : public BLEServerCallbacks {
 // ---------------------------------------------------------------------------
 
 static const char* const kHelpLines[] = {
-    "HELP PING",
-    "HELP GET_TILT",
-    "HELP CALIBRATE [gx gy gz]",
-    "HELP CALIBRATE_RESET",
-    "HELP GET_STATUS",
-    "HELP GET_TIME",
-    "HELP GET_RADEC",
-    "HELP GET_ALTAZ",
-    "HELP GET_MSG",
-    "HELP SET_TIME <ISO8601> [<tz>]",
-    "HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]",
-    "HELP SET_RADEC <ra> <dec>",
-    "HELP SET_ALTAZ <alt> <az>",
-    "HELP SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
-    "HELP SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>",
-    "HELP  FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24",
-    "HELP  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK",
-    "HELP CANCEL_MSG",
-    "HELP START_STREAM <ms>",
-    "HELP STOP_STREAM",
-    "HELP SET_NIGHT_MODE ON|OFF",
-    "HELP BEEP [<notes...>]",
-    "HELP HELP",
+    "PING",
+    "GET_TILT",
+    "CALIBRATE [gx gy gz]",
+    "CALIBRATE_RESET",
+    "GET_STATUS",
+    "GET_TIME",
+    "GET_RADEC",
+    "GET_ALTAZ",
+    "GET_MSG",
+    "SET_TIME <ISO8601> [<tz>]",
+    "SET_SIDEREAL_TIME <HH:MM:SS> [<label>]",
+    "SET_RADEC <ra> <dec>",
+    "SET_ALTAZ <alt> <az>",
+    "SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
+    "SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>",
+    "  FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24",
+    "  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK",
+    "CANCEL_MSG",
+    "START_STREAM <ms>",
+    "STOP_STREAM",
+    "SET_NIGHT_MODE ON|OFF",
+    "BEEP [<notes...>]",
+    "HELP",
 };
 static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
 
@@ -604,7 +604,7 @@ void BleManager::update(DeviceState& state) {
     if (state.pendingBleHelpReady) {
         for (int i = 0; i < kHelpLineCount; i++)
             sendResponse(kHelpLines[i]);
-        sendResponse("HELP OK");
+        sendResponse("OK");
         state.pendingBleHelpReady = false;
     }
 

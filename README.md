@@ -128,37 +128,37 @@ Subscribe to notifications on the **Response** characteristic to receive replies
 
 ### `HELP`
 
-Returns a concise list of all accepted commands. The device sends one notify packet per command line, each prefixed with `HELP `, followed by a `HELP OK` sentinel that signals the list is complete.
+Returns a concise list of all accepted commands. The device sends one notify packet per command line, followed by an `OK` sentinel that signals the list is complete.
 
 ```
 → HELP
-← HELP PING
-← HELP GET_TILT
-← HELP CALIBRATE
-← HELP CALIBRATE_RESET
-← HELP GET_STATUS
-← HELP GET_TIME
-← HELP GET_RADEC
-← HELP GET_ALTAZ
-← HELP GET_MSG
-← HELP SET_TIME <ISO8601> [<tz>]
-← HELP SET_SIDEREAL_TIME <HH:MM:SS> [<label>]
-← HELP SET_RADEC <ra> <dec>
-← HELP SET_ALTAZ <alt> <az>
-← HELP SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
-← HELP SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
+← PING
+← GET_TILT
+← CALIBRATE
+← CALIBRATE_RESET
+← GET_STATUS
+← GET_TIME
+← GET_RADEC
+← GET_ALTAZ
+← GET_MSG
+← SET_TIME <ISO8601> [<tz>]
+← SET_SIDEREAL_TIME <HH:MM:SS> [<label>]
+← SET_RADEC <ra> <dec>
+← SET_ALTAZ <alt> <az>
+← SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
+← SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
 ←   FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24
 ←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK
-← HELP CANCEL_MSG
-← HELP START_STREAM <ms>
-← HELP STOP_STREAM
-← HELP SET_NIGHT_MODE ON|OFF
-← HELP BEEP [<notes...>]
-← HELP HELP
-← HELP OK
+← CANCEL_MSG
+← START_STREAM <ms>
+← STOP_STREAM
+← SET_NIGHT_MODE ON|OFF
+← BEEP [<notes...>]
+← HELP
+← OK
 ```
 
-Clients should subscribe to notifications and collect packets until they receive `HELP OK`. `?` is accepted as a synonym.
+Clients should subscribe to notifications and collect packets until they receive `OK`. `?` is accepted as a synonym.
 
 ---
 

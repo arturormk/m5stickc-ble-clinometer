@@ -12,6 +12,45 @@ from conftest import BleSession
 
 
 # ---------------------------------------------------------------------------
+# HELP
+# ---------------------------------------------------------------------------
+
+async def _collect_help(s) -> list[str]:
+    """Send HELP and collect lines until the OK sentinel."""
+    await s.send_no_wait("HELP")
+    lines: list[str] = []
+    while True:
+        pkt = await s.recv(timeout=5.0)
+        if pkt == "OK":
+            break
+        lines.append(pkt)
+    return lines
+
+
+@pytest.mark.asyncio
+async def test_help_returns_command_list(device_addr):
+    """HELP returns one packet per command ending with OK; no HELP prefix on any line."""
+    async with BleSession(device_addr) as s:
+        lines = await _collect_help(s)
+    assert "PING" in lines
+    assert not any(line.startswith("HELP ") for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_help_synonym(device_addr):
+    """? is accepted as a synonym for HELP."""
+    async with BleSession(device_addr) as s:
+        await s.send_no_wait("?")
+        lines: list[str] = []
+        while True:
+            pkt = await s.recv(timeout=5.0)
+            if pkt == "OK":
+                break
+            lines.append(pkt)
+    assert "PING" in lines
+
+
+# ---------------------------------------------------------------------------
 # Query commands
 # ---------------------------------------------------------------------------
 

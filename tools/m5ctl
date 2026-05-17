@@ -36,14 +36,14 @@ async def send_and_receive(address: str, command: str, timeout: float) -> str:
 
 
 async def cmd_help(address: str, timeout: float) -> None:
-    """Send HELP and collect all response lines until the HELP OK sentinel."""
+    """Send HELP and collect all response lines until the OK sentinel."""
     lines: list[str] = []
     loop = asyncio.get_running_loop()
     done: "asyncio.Future[None]" = loop.create_future()
 
     def on_notify(_, data: bytearray) -> None:
         text = data.decode("utf-8", errors="replace").strip()
-        if text == "HELP OK":
+        if text == "OK":
             if not done.done():
                 done.set_result(None)
         else:
