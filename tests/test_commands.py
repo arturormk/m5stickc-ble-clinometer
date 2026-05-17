@@ -643,6 +643,57 @@ async def test_show_msg_wait_non_ascii_explicit_font_not_overridden(device_addr)
 
 
 # ---------------------------------------------------------------------------
+# SHOW_MSG — word wrap
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_show_msg_japanese_no_spaces_accepted(device_addr):
+    """A long Japanese string (no spaces) is accepted and stored verbatim.
+
+    The display wraps at character boundaries rather than clipping; this test
+    confirms the BLE layer stores the full string correctly.
+    """
+    text = "今日も小さな幸せがたくさん見つかりますように"
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SHOW_MSG INF FONT:5 {text}")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert text in get
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_long_ascii_no_spaces_accepted(device_addr):
+    """A long ASCII token with no spaces (e.g. a URL) is accepted and stored verbatim.
+
+    The display wraps at character boundaries rather than clipping.
+    """
+    text = "https://www.example.com/very/long/path"
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SHOW_MSG INF {text}")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert text in get
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_mixed_ascii_and_japanese_accepted(device_addr):
+    """A message mixing a space-separated ASCII word and a Japanese run is accepted and stored verbatim.
+
+    The display wraps the ASCII word at the space and the Japanese run at
+    character boundaries across subsequent lines.
+    """
+    text = "Hello 今日も小さな"
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SHOW_MSG INF FONT:5 {text}")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert text in get
+        await s.send("CANCEL_MSG")
+
+
+# ---------------------------------------------------------------------------
 # START_STREAM / STOP_STREAM
 # ---------------------------------------------------------------------------
 

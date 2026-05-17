@@ -232,6 +232,14 @@ static void utf8TrimTail(char* s) {
     if (len - i < expected) s[i] = '\0';
 }
 
+static const char* utf8Next(const char* p) {
+    uint8_t c = (uint8_t)*p;
+    if (c < 0x80) return p + 1;
+    if (c < 0xE0) return p + 2;
+    if (c < 0xF0) return p + 3;
+    return p + 4;
+}
+
 static const lgfx::IFont* _msgFont(uint8_t code) {
     switch (code) {
         case 1:  return &fonts::Font2;              //  16 px, ASCII only
@@ -276,6 +284,7 @@ void Display::_drawMessage(const DeviceState& state) {
 
     while (*p && y + lineH <= bottomY) {
         char line[128] = "";
+
         while (*p) {
             const char* wEnd = p;
             while (*wEnd && *wEnd != ' ') wEnd++;
@@ -287,16 +296,34 @@ void Display::_drawMessage(const DeviceState& state) {
                 snprintf(cand, sizeof(cand), "%s %.*s", line, (int)(wEnd - p), p);
             utf8TrimTail(cand);
 
-            // If candidate overflows and we already have something, stop here
-            if (_sprite->textWidth(cand) > maxW && line[0] != '\0') break;
-
-            strncpy(line, cand, sizeof(line) - 1);
-            p = wEnd;
-            if (*p == ' ') p++;
+            if (_sprite->textWidth(cand) <= maxW) {
+                strncpy(line, cand, sizeof(line) - 1);
+                p = wEnd;
+                if (*p == ' ') p++;
+            } else if (line[0] != '\0') {
+                break;  // word doesn't fit but line has content — emit line
+            } else {
+                // Word alone is too wide: split character by character
+                while (*p && *p != ' ') {
+                    const char* cNext = utf8Next(p);
+                    snprintf(cand, sizeof(cand), "%s%.*s", line, (int)(cNext - p), p);
+                    utf8TrimTail(cand);
+                    if (_sprite->textWidth(cand) > maxW) {
+                        if (line[0] == '\0') { strncpy(line, cand, sizeof(line)-1); p = cNext; }
+                        break;
+                    }
+                    strncpy(line, cand, sizeof(line) - 1);
+                    p = cNext;
+                }
+                break;  // emit whatever was built
+            }
         }
-        _sprite->setTextDatum(textdatum_t::top_center);
-        _sprite->drawString(line, _W / 2, y);
-        y += lineH;
+
+        if (line[0] != '\0') {
+            _sprite->setTextDatum(textdatum_t::top_center);
+            _sprite->drawString(line, _W / 2, y);
+            y += lineH;
+        }
     }
     _sprite->setTextDatum(textdatum_t::top_left);
 

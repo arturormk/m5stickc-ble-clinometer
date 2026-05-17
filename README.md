@@ -428,6 +428,8 @@ The default (no `FONT:` token, or `FONT:0` / `FONT:2`) is `Font4`, which is noti
 
 **Automatic Unicode upgrade:** if the message text contains any non-ASCII byte (≥ 0x80) and no `FONT:` token was supplied, the device automatically selects `lgfxJapanGothic_24` (code 6, 24 px) to closely match the default Font4 (26 px) visual size while supporting the full Unicode character set. An explicit `FONT:` directive is always honoured as-is and disables the upgrade. The active font code is visible in the `GET_MSG` response as `FONT=<n>`.
 
+**Text wrapping:** the message text is automatically wrapped to fit the display width. The device breaks at word boundaries (spaces) where possible. When a single word is too wide to fit on one line — as is common in languages that do not use spaces, such as Japanese — the device falls back to character-level splitting. All UTF-8 multi-byte sequences are kept intact; no code point is split across lines. This means long Japanese strings such as `今日も小さな幸せがたくさん見つかりますように` and long ASCII tokens without spaces (such as URLs) wrap across multiple lines rather than being clipped.
+
 ---
 
 ### `SHOW_MSG_WAIT <duration> <buttons> [FONT:<n>] [BEEP] <text>`
