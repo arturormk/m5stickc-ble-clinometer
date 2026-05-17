@@ -67,6 +67,11 @@ static bool parseSiderealHMS(const char* s, time_t* out) {
     return true;
 }
 
+static bool hasNonAscii(const char* s) {
+    for (; *s; s++) if ((uint8_t)*s > 0x7F) return true;
+    return false;
+}
+
 static uint8_t parseMsgButtons(const char* token) {
     if (strcmp(token, "ANY") == 0) return BTN_MASK_ANY;
     uint8_t mask = 0;
@@ -198,7 +203,8 @@ static const char* const kHelpLines[] = {
     "SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
     "SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>",
     "  FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24",
-    "  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK",
+    "  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Unicode/Latin-1",
+    "  no FONT + non-ASCII text: auto-upgrades to goth24",
     "CANCEL_MSG",
     "START_STREAM <ms>",
     "STOP_STREAM",
@@ -302,8 +308,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                         strcat(btnStr, "B");
                     }
                 }
-                snprintf(resp, sizeof(resp), "MSG ACTIVE %s BUTTONS=%s TEXT=%s",
-                         durStr, btnStr, s_state->messageText);
+                snprintf(resp, sizeof(resp), "MSG ACTIVE %s FONT=%u BUTTONS=%s TEXT=%s",
+                         durStr, s_state->messageFontCode, btnStr, s_state->messageText);
             }
 
         // ---- Update commands ----
@@ -384,6 +390,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                     }
                 }
                 s_state->messageFontCode = fontCode;
+                if (fontCode == 0 && hasNonAscii(text))
+                    s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
                 if (beep) {
                     s_state->melodyNotes[0].freqHz = 880;
                     s_state->melodyNotes[0].durMs  = 200;
@@ -431,6 +439,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                     }
                 }
                 s_state->messageFontCode = fontCode;
+                if (fontCode == 0 && hasNonAscii(text))
+                    s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
                 if (beep) {
                     s_state->melodyNotes[0].freqHz = 880;
                     s_state->melodyNotes[0].durMs  = 200;

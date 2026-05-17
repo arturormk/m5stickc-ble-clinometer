@@ -148,7 +148,8 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
 ← SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
 ←   FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24
-←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Latin-1 accents OK
+←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Unicode/Latin-1
+←   no FONT + non-ASCII text: auto-upgrades to goth24 (code 6)
 ← CANCEL_MSG
 ← START_STREAM <ms>
 ← STOP_STREAM
@@ -300,11 +301,11 @@ Returns the current message state.
 → GET_MSG
 ← MSG NONE
 
-← MSG ACTIVE INF BUTTONS=M5 TEXT=Press M5 to continue
-← MSG ACTIVE 4 BUTTONS=NONE TEXT=Moving altitude axis
+← MSG ACTIVE INF FONT=5 BUTTONS=M5 TEXT=Press M5 to continue
+← MSG ACTIVE 4 FONT=0 BUTTONS=NONE TEXT=Moving altitude axis
 ```
 
-The second field is the remaining lifetime in seconds, or `INF` for a persistent message.
+The second field is the remaining lifetime in seconds, or `INF` for a persistent message. `FONT=<n>` is the active font code (see the font code table under `SHOW_MSG`); code 0 is the default `Font4`.
 
 ---
 
@@ -414,8 +415,8 @@ The device switches to the message screen immediately and returns to the previou
 
 | Code | Font | Approx. height | Character coverage |
 |------|------|----------------|--------------------|
-| 1 | `Font2` (Bodmer BMPfont) | ~7 px | ASCII 0x20–0x7E only |
-| 2 | `Font4` (Bodmer BMPfont) — **default** | ~14 px | ASCII 0x20–0x7E only |
+| 1 | `Font2` (Bodmer BMPfont) | 16 px | ASCII 0x20–0x7E only |
+| 2 | `Font4` (Bodmer BMPfont) — **default** | 26 px | ASCII 0x20–0x7E only |
 | 3 | `DejaVu18` (Adafruit GFX) | ~18 px | ASCII 0x20–0x7E only |
 | 4 | `DejaVu24` (Adafruit GFX) | ~24 px | ASCII 0x20–0x7E only |
 | 5 | `lgfxJapanGothic_16` (U8g2) | 16 px | Full Unicode incl. Latin-1 extended (é, ü, ñ …) |
@@ -424,6 +425,8 @@ The device switches to the message screen immediately and returns to the previou
 Fonts 1–4 are bitmap or proportional sans-serif fonts that cover standard ASCII printable characters only. Accented letters, currency symbols (€, £), and other characters above U+007E will not render with those fonts — use code 5 or 6 instead. `lgfxJapanGothic` is a U8g2 Unicode font that also handles CJK characters.
 
 The default (no `FONT:` token, or `FONT:0` / `FONT:2`) is `Font4`, which is noticeably larger than the original `Font2` used before this feature was added.
+
+**Automatic Unicode upgrade:** if the message text contains any non-ASCII byte (≥ 0x80) and no `FONT:` token was supplied, the device automatically selects `lgfxJapanGothic_24` (code 6, 24 px) to closely match the default Font4 (26 px) visual size while supporting the full Unicode character set. An explicit `FONT:` directive is always honoured as-is and disables the upgrade. The active font code is visible in the `GET_MSG` response as `FONT=<n>`.
 
 ---
 

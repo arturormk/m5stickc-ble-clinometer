@@ -221,14 +221,25 @@ void Display::_drawAltAz(const DeviceState& state) {
 //   Font6/Font8 are 7-segment digit-only glyphs; do not use for text.
 //   lgfxJapanGothic (U8g2) covers full Unicode including Latin-1 extended
 //   (é, ü, ñ …) — use codes 5 or 6 whenever accented characters are needed.
+static void utf8TrimTail(char* s) {
+    int len = (int)strlen(s);
+    if (len == 0) return;
+    int i = len - 1;
+    while (i >= 0 && ((uint8_t)s[i] & 0xC0) == 0x80) i--;
+    if (i < 0) return;
+    uint8_t lead = (uint8_t)s[i];
+    int expected = (lead < 0x80) ? 1 : (lead < 0xE0) ? 2 : (lead < 0xF0) ? 3 : 4;
+    if (len - i < expected) s[i] = '\0';
+}
+
 static const lgfx::IFont* _msgFont(uint8_t code) {
     switch (code) {
-        case 1:  return &fonts::Font2;              //  ~7 px, ASCII only
+        case 1:  return &fonts::Font2;              //  16 px, ASCII only
         case 3:  return &fonts::DejaVu18;           // ~18 px, ASCII only
         case 4:  return &fonts::DejaVu24;           // ~24 px, ASCII only
         case 5:  return &fonts::lgfxJapanGothic_16; //  16 px, Unicode (Latin-1 accents OK)
         case 6:  return &fonts::lgfxJapanGothic_24; //  24 px, Unicode (Latin-1 accents OK)
-        default: return &fonts::Font4;              // ~14 px, ASCII only (codes 0, 2, unknown)
+        default: return &fonts::Font4;              //  26 px, ASCII only (codes 0, 2, unknown)
     }
 }
 
@@ -274,6 +285,7 @@ void Display::_drawMessage(const DeviceState& state) {
                 snprintf(cand, sizeof(cand), "%.*s", (int)(wEnd - p), p);
             else
                 snprintf(cand, sizeof(cand), "%s %.*s", line, (int)(wEnd - p), p);
+            utf8TrimTail(cand);
 
             // If candidate overflows and we already have something, stop here
             if (_sprite->textWidth(cand) > maxW && line[0] != '\0') break;

@@ -402,6 +402,14 @@ def _msg_text(resp: str) -> str:
     return tail
 
 
+def _msg_font(resp: str) -> int:
+    """Extract the FONT=<n> value from a GET_MSG response, or -1 if absent."""
+    _, _, tail = resp.partition("FONT=")
+    if not tail:
+        return -1
+    return int(tail.split()[0])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("font_code", [1, 2, 3, 4, 5, 6])
 async def test_show_msg_font_code_accepted(device_addr, font_code):
@@ -533,6 +541,104 @@ async def test_show_msg_wait_font_and_beep_combined(device_addr):
         assert resp == "OK MSG_WAIT"
         get = await s.send("GET_MSG")
         assert _msg_text(get) == "Ready?"
+        await s.send("CANCEL_MSG")
+
+
+# ---------------------------------------------------------------------------
+# GET_MSG FONT= field
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_msg_includes_font_field(device_addr):
+    """GET_MSG response includes a FONT=<n> field."""
+    async with BleSession(device_addr) as s:
+        await s.send("SHOW_MSG 10 Hello")
+        get = await s.send("GET_MSG")
+        assert "FONT=" in get, f"FONT= field missing from GET_MSG: {get!r}"
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("font_code", [1, 3, 4, 5, 6])
+async def test_get_msg_font_field_reflects_explicit_code(device_addr, font_code):
+    """GET_MSG FONT= matches the code that was explicitly supplied."""
+    async with BleSession(device_addr) as s:
+        await s.send(f"SHOW_MSG 10 FONT:{font_code} Test")
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == font_code, (
+            f"Expected FONT={font_code}, got {_msg_font(get)} in {get!r}"
+        )
+        await s.send("CANCEL_MSG")
+
+
+# ---------------------------------------------------------------------------
+# SHOW_MSG / SHOW_MSG_WAIT — automatic Unicode font upgrade
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_show_msg_non_ascii_auto_upgrades_font(device_addr):
+    """Non-ASCII text with no FONT: directive auto-selects lgfxJapanGothic_24 (code 6)."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG INF Héllo wörld")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == 6, (
+            f"Expected auto-upgrade to FONT=6, got {_msg_font(get)}: {get!r}"
+        )
+        assert "Héllo wörld" in get
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_ascii_keeps_default_font(device_addr):
+    """Pure-ASCII text with no FONT: directive keeps the default (code 0 = Font4)."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG INF Hello world")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == 0, (
+            f"Expected FONT=0 for ASCII text, got {_msg_font(get)}: {get!r}"
+        )
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_non_ascii_explicit_font_not_overridden(device_addr):
+    """An explicit FONT: directive is honoured even when the text contains non-ASCII."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG INF FONT:3 Héllo")
+        assert resp == "OK MSG"
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == 3, (
+            f"Expected explicit FONT=3 to be preserved, got {_msg_font(get)}: {get!r}"
+        )
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_wait_non_ascii_auto_upgrades_font(device_addr):
+    """SHOW_MSG_WAIT with non-ASCII text and no FONT: auto-selects code 6."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG_WAIT INF M5 ¿Continuar?")
+        assert resp == "OK MSG_WAIT"
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == 6, (
+            f"Expected auto-upgrade to FONT=6, got {_msg_font(get)}: {get!r}"
+        )
+        assert "¿Continuar?" in get
+        await s.send("CANCEL_MSG")
+
+
+@pytest.mark.asyncio
+async def test_show_msg_wait_non_ascii_explicit_font_not_overridden(device_addr):
+    """An explicit FONT: in SHOW_MSG_WAIT is honoured even with non-ASCII text."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SHOW_MSG_WAIT INF M5 FONT:6 ¡Atención!")
+        assert resp == "OK MSG_WAIT"
+        get = await s.send("GET_MSG")
+        assert _msg_font(get) == 6, (
+            f"Expected explicit FONT=6 to be preserved, got {_msg_font(get)}: {get!r}"
+        )
         await s.send("CANCEL_MSG")
 
 
