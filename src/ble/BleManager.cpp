@@ -73,6 +73,28 @@ static bool hasNonAscii(const char* s) {
     return false;
 }
 
+// Sanitizes a BLE command buffer in-place: replaces NBSP (C2 A0) and ideographic
+// space (E3 80 80) with ASCII space, passes other bytes through unchanged.
+// Returns false (with *errCodepoint set) if any ASCII control character is found.
+static bool sanitizeBleInput(char* s, uint32_t* errCodepoint) {
+    uint8_t* r = (uint8_t*)s;
+    uint8_t* w = (uint8_t*)s;
+    while (*r) {
+        if (r[0] == 0xC2 && r[1] == 0xA0) {
+            *w++ = ' '; r += 2;
+        } else if (r[0] == 0xE3 && r[1] == 0x80 && r[2] == 0x80) {
+            *w++ = ' '; r += 3;
+        } else if (*r < 0x20 || *r == 0x7F) {
+            if (errCodepoint) *errCodepoint = *r;
+            return false;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+    return true;
+}
+
 static uint8_t parseMsgButtons(const char* token) {
     if (strcmp(token, "ANY") == 0) return BTN_MASK_ANY;
     uint8_t mask = 0;
@@ -236,6 +258,18 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         int end = (int)strlen(cmd) - 1;
         while (end >= 0 && (cmd[end] == '\r' || cmd[end] == '\n' || cmd[end] == ' '))
             cmd[end--] = '\0';
+
+        // Normalise unicode spaces; reject embedded control characters
+        {
+            uint32_t badCp = 0;
+            if (!sanitizeBleInput(cmd, &badCp)) {
+                snprintf((char*)s_state->pendingBleResponse,
+                         sizeof(s_state->pendingBleResponse),
+                         "ERR INVALID_CHAR U+%04" PRIX32, badCp);
+                s_state->pendingBleResponseReady = true;
+                return;
+            }
+        }
 
         char resp[160];
         resp[0] = '\0';

@@ -121,6 +121,8 @@ Commands and responses are **ASCII text**, one per write/notify. Fields are spac
 
 **Newline framing (optional):** If a client sends commands that end with `\n` (or `\r\n`), the device detects this on the first such command and appends `\n` to every subsequent reply and async notification for that connection. This makes the stream appear as newline-delimited text to clients that treat BLE as a byte stream. Clients that send commands without a trailing `\n` receive plain responses with no terminator. The flag is sticky for the lifetime of a connection and resets on disconnect.
 
+**Input sanitisation:** Before tokenising each command write the device normalises two common non-ASCII space variants to ASCII space: NBSP (U+00A0, `C2 A0`) and ideographic space (U+3000, `E3 80 80`). Commands pasted from iOS/Android keyboards or copy-pasted text that contains these variants therefore parse correctly without client-side workarounds. If the write contains any other ASCII control character (byte value `< 0x20` or `0x7F`) after the trailing-whitespace strip, the write is rejected immediately with `ERR INVALID_CHAR U+XXXX` where `XXXX` is the hex code point of the first offending byte.
+
 Subscribe to notifications on the **Response** characteristic to receive replies and asynchronous events (button presses, screen changes). The device sends one notify per command reply.
 
 ---
@@ -617,6 +619,7 @@ TILT +0.38 -1.12
 | `ERR BAD_ARGS` | Wrong number or format of arguments |
 | `ERR BAD_TIME` | `SET_TIME` value could not be parsed |
 | `ERR BAD_MELODY <melody>` | `BEEP` received an unrecognised note token; the melody string is echoed back with `^` inserted before the first invalid token |
+| `ERR INVALID_CHAR U+XXXX` | Command write contained an ASCII control character; `XXXX` is the hex code point of the first offending byte. NBSP (U+00A0) and ideographic space (U+3000) are normalised to space and do not trigger this error. |
 
 ---
 
@@ -769,8 +772,9 @@ uv run pytest
 # Specify a non-default BLE address
 uv run pytest --device AA:BB:CC:DD:EE:FF
 
-# Run only the newline protocol tests
+# Run only a specific test module
 uv run pytest tests/test_newline.py
+uv run pytest tests/test_sanitize.py
 ```
 
 Set the environment variable `M5_ADDR` as an alternative to `--device`.
@@ -805,6 +809,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   ├── conftest.py        BleSession helper and pytest fixtures
 │   ├── test_commands.py   BLE command interface tests
 │   ├── test_newline.py    Newline-framing protocol tests
+│   ├── test_sanitize.py   Input sanitisation tests (NBSP/ideographic-space normalisation, control-char rejection)
 │   └── 3d_model.py        Real-time 3D orientation viewer (pygame + PyOpenGL)
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
