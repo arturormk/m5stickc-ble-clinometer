@@ -58,18 +58,16 @@ void ImuManager::update(DeviceState& state) {
     float gcx, gcy, gcz;
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
 
-    // Device-dependent axis mapping.
-    // Pitch = tilting the screen toward/away from you (rotation around the long axis).
-    // Roll  = side tilt (rotation around the short axis).
-    //   IMU_LONG_AXIS_IS_Y=1 (M5StickC): long=Y → rotate around Y changes gcx → pitch from gcx
-    //   IMU_LONG_AXIS_IS_Y=0 (Core2 etc): long=X → rotate around X changes gcy → pitch from gcy
-#if IMU_LONG_AXIS_IS_Y
-    state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
-    state.rollDeg  = atan2f( gcy, gcz) * 57.2957795f;
-#else
-    state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
-    state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
-#endif
+    // StickC series: long axis is Y → tipping long axis changes gcy → pitch from gcy.
+    // Other boards (Core2, CoreS3): long axis is X → pitch from gcx.
+    if (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+            || M5.getBoard() == m5::board_t::board_M5StickCPlus) {
+        state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
+        state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
+    } else {
+        state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
+        state.rollDeg  = atan2f( gcy, gcz) * 57.2957795f;
+    }
 
     state.tiltTimestampMs = now;
 }

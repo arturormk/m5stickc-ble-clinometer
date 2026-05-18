@@ -24,15 +24,12 @@ void Display::update(const DeviceState& state) {
     _lastRefreshMs = now;
 
     // Auto-rotate 180° based on gravity. Hysteresis at ±0.3 g prevents flicker.
-    // M5StickC Plus 2 (IMU_LONG_AXIS_IS_Y=1): long axis is Y, so gravX signals
-    // which end is up. Other devices (IMU_LONG_AXIS_IS_Y=0): long axis is X, so
-    // gravY signals orientation.
+    // StickC series: long axis is Y → gravX signals upright end.
+    // Other boards: long axis is X → gravY signals orientation.
     if (state.imuAvailable) {
-#if IMU_LONG_AXIS_IS_Y
-        float flipSensor = state.gravX;
-#else
-        float flipSensor = state.gravY;
-#endif
+        float flipSensor = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+                         || M5.getBoard() == m5::board_t::board_M5StickCPlus)
+                         ? state.gravX : state.gravY;
         if (!_screenFlipped && flipSensor < -0.3f) {
             _screenFlipped = true;
             M5.Display.setRotation(3);
