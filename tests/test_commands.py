@@ -806,17 +806,18 @@ async def test_beep_melody(device_addr):
 
 @pytest.mark.asyncio
 async def test_beep_bad_note(device_addr):
+    """Bad note at the start of the melody is flagged with a leading caret."""
     async with BleSession(device_addr) as s:
         resp = await s.send("BEEP Z4")
-    assert resp == "BAD MELODY @1"
+    assert resp == "ERR BAD_MELODY ^Z4"
 
 
 @pytest.mark.asyncio
-async def test_beep_bad_note_offset(device_addr):
-    """Error position reflects token start within melody string."""
+async def test_beep_bad_note_mid_melody(device_addr):
+    """Caret appears at the first bad token; valid prefix tokens are echoed before it."""
     async with BleSession(device_addr) as s:
         resp = await s.send("BEEP C4 Z4")
-    assert resp == "BAD MELODY @4"
+    assert resp == "ERR BAD_MELODY C4 ^Z4"
 
 
 # ---------------------------------------------------------------------------
