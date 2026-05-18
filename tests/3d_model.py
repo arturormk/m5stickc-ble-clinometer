@@ -3,8 +3,8 @@
 
 Usage:
     python tests/3d_model.py                          # demo mode (animated)
-    python tests/3d_model.py --device F0:24:F9:9B:E2:52
-    python tests/3d_model.py --device F0:24:F9:9B:E2:52 --model 2
+    python tests/3d_model.py --device AA:BB:CC:DD:EE:FF
+    python tests/3d_model.py --device AA:BB:CC:DD:EE:FF --model 2
 
 Keys: 1/2/3 switch device model, Q/Esc quit.
 """
@@ -12,6 +12,8 @@ Keys: 1/2/3 switch device model, Q/Esc quit.
 import argparse
 import asyncio
 import math
+import os
+import pathlib
 import threading
 from dataclasses import dataclass, field
 
@@ -41,8 +43,23 @@ except Exception:
 # ── BLE constants (mirrors tests/conftest.py) ──────────────────────────────────
 CMD_UUID      = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
 RESP_UUID     = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
-DEFAULT_ADDR  = "F0:24:F9:9B:E2:52"
 STREAM_MS     = 100   # firmware minimum is 100 ms → ~10 Hz
+
+_CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
+
+
+def _load_conf_addr() -> str | None:
+    if not _CONF_FILE.is_file():
+        return None
+    for raw in _CONF_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            if key.strip() == "device":
+                return val.strip() or None
+    return None
 
 # ── Device models ──────────────────────────────────────────────────────────────
 
@@ -372,7 +389,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--device", default=None, metavar="ADDR",
-        help="BLE address to connect (env M5_ADDR also works; omit to scan)",
+        help="BLE address to connect (env M5_BLE_ADDR or .m5ctl.conf also work; omit to scan)",
     )
     parser.add_argument(
         "--sim", action="store_true",
@@ -384,12 +401,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    import os, sys
+    import sys
     demo_mode   = args.sim
     device_addr = None
 
     if not demo_mode:
-        device_addr = args.device or os.environ.get("M5_ADDR")
+        device_addr = args.device or os.environ.get("M5_BLE_ADDR") or _load_conf_addr()
         if device_addr is None:
             device_addr = _scan_and_pick()
             if device_addr is None:

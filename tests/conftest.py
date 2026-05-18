@@ -2,31 +2,49 @@
 
 import asyncio
 import os
+import pathlib
 
 import pytest
 from bleak import BleakClient
 
-DEFAULT_ADDRESS = "F0:24:F9:9B:E2:52"
 CONNECT_TIMEOUT = 10.0
 CMD_UUID  = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
 RESP_UUID = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
+
+_CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
+
+
+def _load_device_addr() -> str | None:
+    if not _CONF_FILE.is_file():
+        return None
+    for raw in _CONF_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            if key.strip() == "device":
+                return val.strip() or None
+    return None
 
 
 def pytest_addoption(parser):
     parser.addoption(
         "--device", default=None, metavar="ADDR",
-        help=f"BLE address of the M5StickC device "
-             f"(default: env M5_ADDR or {DEFAULT_ADDRESS})",
+        help="BLE address of the M5StickC device (env M5_BLE_ADDR or .m5ctl.conf also work)",
     )
 
 
 @pytest.fixture(scope="session")
 def device_addr(pytestconfig):
-    return (
+    addr = (
         pytestconfig.getoption("--device")
-        or os.environ.get("M5_ADDR")
-        or DEFAULT_ADDRESS
+        or os.environ.get("M5_BLE_ADDR")
+        or _load_device_addr()
     )
+    if not addr:
+        pytest.skip("No device configured — set M5_BLE_ADDR, create .m5ctl.conf, or pass --device ADDR")
+    return addr
 
 
 class BleSession:

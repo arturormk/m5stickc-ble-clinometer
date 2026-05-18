@@ -655,7 +655,7 @@ uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 usage: m5ctl [-h] [-d ADDR] [-t SEC] COMMAND ...
 
 options:
-  -d ADDR   BLE address (default: F0:24:F9:9B:E2:52)
+  -d ADDR   BLE MAC address. Priority: --device > $M5_BLE_ADDR > .m5ctl.conf
   -t SEC    seconds to wait for a response (default: 5)
 ```
 
@@ -707,6 +707,23 @@ uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
 uv run tools/m5ctl listen --stream 500
 uv run tools/m5ctl listen
 ```
+
+### Device address configuration
+
+The BLE MAC address of your device is looked up in this order:
+
+1. `--device ADDR` CLI flag
+2. `M5_BLE_ADDR` environment variable
+3. `.m5ctl.conf` config file at the project root (gitignored)
+
+Create `.m5ctl.conf` at the project root with your device's MAC address:
+
+```ini
+# .m5ctl.conf — gitignored, do not commit
+device=F0:24:F9:9B:E2:52
+```
+
+Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the three sources provides an address, `m5ctl` exits with an error — `scan` is the only subcommand that works without one.
 
 ### `set-time-now` — set device clock to current host time
 

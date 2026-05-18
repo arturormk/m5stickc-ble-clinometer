@@ -3,12 +3,31 @@
 
 import asyncio
 import argparse
+import os
+import pathlib
 import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from bleak import BleakClient, BleakScanner, BleakError
 
-DEFAULT_ADDRESS = "F0:24:F9:9B:E2:52"
+_CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
+_ENV_VAR   = "M5_BLE_ADDR"
+
+
+def _load_device_addr() -> str | None:
+    if not _CONF_FILE.is_file():
+        return None
+    for raw in _CONF_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            if key.strip() == "device":
+                return val.strip() or None
+    return None
+
+
 CONNECT_TIMEOUT = 10.0
 
 CMD_UUID    = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
@@ -188,9 +207,13 @@ examples:
     )
     parser.add_argument(
         "-d", "--device",
-        default=DEFAULT_ADDRESS,
+        default=os.environ.get(_ENV_VAR) or _load_device_addr(),
         metavar="ADDR",
-        help=f"BLE address (default: {DEFAULT_ADDRESS})",
+        help=(
+            f"BLE MAC address of the device. "
+            f"Priority: --device > ${_ENV_VAR} > {_CONF_FILE.name}. "
+            f"Create .m5ctl.conf in the project root with: device=AA:BB:CC:DD:EE:FF"
+        ),
     )
     parser.add_argument(
         "-t", "--timeout",
@@ -288,6 +311,14 @@ examples:
                         "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
 
     args = parser.parse_args()
+
+    if args.cmd != "scan" and not args.device:
+        print(
+            f"error: no device address configured.\n"
+            f"  Set ${_ENV_VAR}, create {_CONF_FILE}, or use --device ADDR.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     match args.cmd:
         case "help":
