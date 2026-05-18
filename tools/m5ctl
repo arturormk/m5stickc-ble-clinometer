@@ -179,7 +179,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  m5ctl tilt                # pitch and roll in degrees
+  m5ctl tilt                # pitch, roll in degrees, gravity magnitude in g
   m5ctl calibrate                             # zero at current orientation; prints ref vector
   m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
   m5ctl calibrate-reset                       # restore hardware reference
@@ -234,7 +234,7 @@ examples:
     # --- simple query commands ---
     sub.add_parser("help",        help="List all accepted BLE commands")
     sub.add_parser("ping",        help="Ping the device")
-    sub.add_parser("tilt",        help="Get current pitch/roll angles")
+    sub.add_parser("tilt",        help="Get current pitch/roll angles and gravity magnitude (g)")
     p = sub.add_parser("calibrate",
                        help="Calibrate from current orientation, or restore a saved reference vector")
     p.add_argument("ref", nargs="*", metavar="FLOAT",

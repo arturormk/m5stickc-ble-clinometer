@@ -392,12 +392,14 @@ OK PONG
 
 #### `GET_TILT`
 
-Returns current X and Y tilt in degrees.
+Returns current pitch and roll in degrees, and the filtered gravity vector magnitude in g.
+
+Format: `TILT <pitch> <roll> <g>` — pitch and roll are signed decimal degrees; g is the magnitude of the low-pass filtered accelerometer vector in units of g (~1.00 when stationary, deviates when the device is accelerating or vibrating).
 
 Response example:
 
 ```text
-TILT +0.42 -1.17
+TILT +0.42 -1.17 1.00
 ```
 
 #### `GET_STATUS`
@@ -624,7 +626,7 @@ OK STREAM 500
 Notification example:
 
 ```text
-TILT +0.38 -1.12
+TILT +0.38 -1.12 0.99
 ```
 
 #### `STOP_STREAM`

@@ -80,15 +80,16 @@ async def test_ping_case_insensitive(device_addr):
 
 @pytest.mark.asyncio
 async def test_get_tilt_format(device_addr):
-    """GET_TILT should return TILT <±X.XX> <±Y.XX>."""
+    """GET_TILT should return TILT <±pitch> <±roll> <g>."""
     async with BleSession(device_addr) as s:
         resp = await s.send("GET_TILT")
     assert resp.startswith("TILT ")
     parts = resp.split()
-    assert len(parts) == 3
-    # Both values must be parseable as floats
-    float(parts[1])
-    float(parts[2])
+    assert len(parts) == 4
+    float(parts[1])   # pitch degrees
+    float(parts[2])   # roll degrees
+    g = float(parts[3])
+    assert 0.5 <= g <= 1.5, f"gravity magnitude {g}g out of expected range for a stationary device"
 
 
 @pytest.mark.asyncio
@@ -744,9 +745,11 @@ async def test_stream_packets(device_addr):
             pkt = await s.recv(timeout=1.0)
             assert pkt.startswith("TILT ")
             parts = pkt.split()
-            assert len(parts) == 3
-            float(parts[1])
-            float(parts[2])
+            assert len(parts) == 4
+            float(parts[1])   # pitch degrees
+            float(parts[2])   # roll degrees
+            g = float(parts[3])
+            assert 0.5 <= g <= 1.5, f"gravity magnitude {g}g out of expected range for a stationary device"
         await s.send_no_wait("STOP_STREAM")
         # Drain the queue until we see the OK (skipping any in-flight TILT packets)
         await s.recv_matching("OK STREAM", timeout=2.0)

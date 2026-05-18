@@ -295,8 +295,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             strncpy(resp, "OK PONG", sizeof(resp) - 1);
 
         } else if (strcasecmp(tok, "GET_TILT") == 0) {
-            snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f",
-                     s_state->pitchDeg, s_state->rollDeg);
+            snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f %.2f",
+                     s_state->pitchDeg, s_state->rollDeg, s_state->accMag);
 
         } else if (strcasecmp(tok, "GET_STATUS") == 0) {
             buildStatusLine(*s_state, resp, sizeof(resp));
@@ -743,8 +743,8 @@ void BleManager::update(DeviceState& state) {
         uint32_t now = millis();
         if ((now - state.lastStreamMs) >= state.streamPeriodMs) {
             char buf[64];
-            snprintf(buf, sizeof(buf), "TILT %+.2f %+.2f",
-                     state.pitchDeg, state.rollDeg);
+            snprintf(buf, sizeof(buf), "TILT %+.2f %+.2f %.2f",
+                     state.pitchDeg, state.rollDeg, state.accMag);
             sendResponse(buf);
             state.lastStreamMs = now;
         }

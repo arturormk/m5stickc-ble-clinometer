@@ -51,8 +51,9 @@ void ImuManager::update(DeviceState& state) {
     _lastGy = ALPHA * ay + (1.0f - ALPHA) * _lastGy;
     _lastGz = ALPHA * az + (1.0f - ALPHA) * _lastGz;
 
-    state.gravX = _lastGx;
-    state.gravY = _lastGy;
+    state.gravX  = _lastGx;
+    state.gravY  = _lastGy;
+    state.accMag = sqrtf(_lastGx*_lastGx + _lastGy*_lastGy + _lastGz*_lastGz);
 
     // Apply calibration rotation
     float gcx, gcy, gcz;

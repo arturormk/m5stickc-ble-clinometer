@@ -186,25 +186,53 @@ Returns a liveness acknowledgement.
 
 ### `GET_TILT`
 
-Returns the current **pitch** and **roll** angles in decimal degrees.
+Returns the current **pitch**, **roll**, and **gravity magnitude** in decimal degrees and g respectively.
 
 ```
 → GET_TILT
-← TILT +0.42 -1.17
+← TILT +0.42 -1.17 1.00
 ```
 
-The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis) and the second is **roll** (side tilt — rotation around the short axis). Both are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping.
+The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis), the second is **roll** (side tilt — rotation around the short axis), and the third is the **gravity vector magnitude in g**. Both angles are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping. The g value is ~1.00 when the device is stationary; it rises when the device is accelerating or vibrating, which signals that the current pitch/roll reading may be noisy.
 
 **Axis mapping** is device-dependent and detected at runtime via `M5.getBoard()`:
 
-| Device | Pitch formula | Roll formula |
-|---|---|---|
-| M5StickC Plus / Plus2 | `atan2(ay, az)` | `atan2(-ax, az)` |
-| Core2, CoreS3, others | `atan2(-ax, az)` | `atan2(ay, az)` |
+| Device | Pitch formula | Roll formula | Pitch axis | Roll axis |
+|---|---|---|---|---|
+| M5StickC Plus / Plus2 | `atan2(ay, az)` | `atan2(-ax, az)` | Y (long axis) | X (short axis) |
+| Core2, CoreS3, others | `atan2(-ax, az)` | `atan2(ay, az)` | X (long axis) | Y (short axis) |
+
+**Reconstructing the acceleration vector** from `TILT <pitch> <roll> <g>`:
+
+The three values are sufficient to recover the full calibrated gravity vector. Let α = pitch in radians, β = roll in radians. Define:
+
+```
+D = sqrt(cos²β + sin²β · cos²α)
+```
+
+Then for **M5StickC Plus / Plus2** (Y = pitch axis, X = roll axis):
+
+```
+accX = −g · sin(β) · cos(α) / D
+accY = +g · sin(α) · cos(β) / D
+accZ = +g · cos(α) · cos(β) / D
+```
+
+For **Core2, CoreS3, others** (X = pitch axis, Y = roll axis):
+
+```
+accX = −g · sin(α) · cos(β) / D
+accY = +g · cos(α) · sin(β) / D
+accZ = +g · cos(α) · cos(β) / D
+```
+
+D equals 1 when either angle is zero and decreases toward the extremes; for angles below ~30° it is within 5% of 1, and the familiar small-angle approximation `accX ≈ ∓g·sin(roll)`, `accY ≈ ±g·sin(pitch)`, `accZ ≈ g` is accurate to the same order.
+
+When a `CALIBRATE` offset is active, these are in the **calibrated frame of reference** — the origin of pitch = 0, roll = 0 is the stored reference orientation, not the hardware default. `CALIBRATE_RESET` returns to the hardware frame (device flat and face-up).
 
 **Upside-down behaviour:** when the device is perfectly inverted and level (pitch/roll near ±180°) both values approach ±180°, correctly indicating that it is level but face-down. The on-screen bubble uses `sin(angle)` for its position so it smoothly re-centres at ±180° — the bubble sits at the centre of the circle whether the device is face-up or face-down level. The numeric display and this response always show the true angle.
 
-A calibration offset can be applied with `CALIBRATE` (see below). Values update at ~15 Hz internally; the response reflects the most recent filtered sample.
+Values update at ~15 Hz internally; the response reflects the most recent filtered sample.
 
 ---
 
@@ -677,10 +705,10 @@ EVENT BUTTON B
 
 ### Streaming tilt
 
-When `START_STREAM` is active, periodic tilt notifications are sent in the same format as `GET_TILT` — first value pitch, second roll:
+When `START_STREAM` is active, periodic tilt notifications are sent in the same format as `GET_TILT` — pitch, roll, gravity magnitude in g:
 
 ```
-TILT +0.38 -1.12
+TILT +0.38 -1.12 0.99
 ```
 
 ---

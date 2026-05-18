@@ -35,6 +35,7 @@ struct DeviceState {
     float    rollDeg;
     float    gravX;           // raw filtered gravity X component (device frame, before calibration)
     float    gravY;           // raw filtered gravity Y component (device frame, before calibration)
+    float    accMag;          // filtered gravity vector magnitude in g (~1.0 when stationary; data quality indicator)
     uint32_t tiltTimestampMs;
 
     time_t   timeEpochSec;       // 0 = not set
