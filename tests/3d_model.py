@@ -69,9 +69,11 @@ class DeviceModel:
     w: float          # X half-dimension in OpenGL units (width / 2)
     h: float          # Y half-dimension (height / 2)
     d: float          # Z half-dimension (depth / 2)
-    # 'Y' → M5StickC Plus / Plus2 (long axis Y, pitch=atan2(ay,az), roll=atan2(-ax,az))
-    # 'X' → Core2, CoreS3, others  (long axis X, pitch=atan2(-ax,az), roll=atan2(ay,az))
-    pitch_axis: str   = 'X'
+    # 'X' → M5StickC Plus / Plus2: IMU X runs along the physical long axis;
+    #        pitch=atan2(-ax,az), roll=atan2(ay,az)
+    # 'Y' → Core2, CoreS3, others: IMU Y runs along the physical long axis;
+    #        pitch=atan2(ay,az),  roll=atan2(-ax,az)
+    pitch_axis: str   = 'Y'
     # Screen inset on the +Z face.  All values are fractions of w or h.
     scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward +X
     scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward +Y
@@ -83,7 +85,7 @@ class DeviceModel:
 # from the USB-C port) and is narrower than the body.
 MODELS = [
     DeviceModel("M5StickC Plus 2", w=27.3/20, h=53.3/20, d=13.5/20,
-                pitch_axis='Y', scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
+                pitch_axis='X', scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
     DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20),
     DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20),
 ]
@@ -303,11 +305,9 @@ class Renderer:
         # axis back toward vertical (harder to see orientation).
         gluLookAt(6.5, -3.0, 5.0,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Apply device orientation: pitch around Y, then roll around X.
-        # Firmware: pitch=atan2(-gcx,gcz) gives positive pitch when +X tilts down,
-        # which is exactly a positive RHR rotation about +Y — no sign flip needed.
-        glRotatef(-pitch, 0.0, 1.0, 0.0)
-        glRotatef(-roll,  1.0, 0.0, 0.0)
+        # Apply device orientation: pitch around Y, roll around X.
+        glRotatef(pitch, 0.0, 1.0, 0.0)
+        glRotatef(roll,  1.0, 0.0, 0.0)
 
         draw_box(model)
         draw_axes(model)
@@ -320,15 +320,15 @@ class Renderer:
         D = math.sqrt(math.cos(beta)**2 + math.sin(beta)**2 * math.cos(alpha)**2)
         if D < 1e-9:
             ax = ay = az = 0.0
-        elif model.pitch_axis == 'Y':
-            # M5StickC Plus / Plus2: pitch=atan2(ay,az), roll=atan2(-ax,az)
-            ax = -g * math.sin(beta)  * math.cos(alpha) / D
-            ay =  g * math.sin(alpha) * math.cos(beta)  / D
+        elif model.pitch_axis == 'X':
+            # M5StickC Plus / Plus2: pitch=atan2(-ax,az), roll=atan2(ay,az)
+            ax = -g * math.sin(alpha) * math.cos(beta)  / D
+            ay =  g * math.sin(beta)  * math.cos(alpha) / D
             az =  g * math.cos(alpha) * math.cos(beta)  / D
         else:
-            # Core2, CoreS3, others: pitch=atan2(-ax,az), roll=atan2(ay,az)
-            ax = -g * math.sin(alpha) * math.cos(beta)  / D
-            ay =  g * math.cos(alpha) * math.sin(beta)  / D
+            # Core2, CoreS3, others: pitch=atan2(ay,az), roll=atan2(-ax,az)
+            ax = -g * math.sin(beta)  * math.cos(alpha) / D
+            ay =  g * math.sin(alpha) * math.cos(beta)  / D
             az =  g * math.cos(alpha) * math.cos(beta)  / D
 
         if demo:

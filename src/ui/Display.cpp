@@ -109,8 +109,11 @@ void Display::_drawClinometer(const DeviceState& state) {
                   || M5.getBoard() == m5::board_t::board_M5StickCPlus);
     float hAngle = isStickC ? _dispRoll  : _dispPitch;
     float vAngle = isStickC ? _dispPitch : _dispRoll;
-    int bx = cx - (int)(sinf(hAngle * kDeg2Rad) * bubbleScale);
-    int by = cy + (int)(sinf(vAngle * kDeg2Rad) * bubbleScale);
+    // When the screen is flipped 180° both screen axes invert, so negate the
+    // displacement to keep the bubble tracking the physically higher side.
+    float flipSign = _screenFlipped ? -1.0f : 1.0f;
+    int bx = cx - (int)(flipSign * sinf(hAngle * kDeg2Rad) * bubbleScale);
+    int by = cy + (int)(flipSign * sinf(vAngle * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;
