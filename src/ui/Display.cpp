@@ -64,6 +64,11 @@ static void fmtAngle(char* buf, size_t sz, float deg) {
 
 void Display::_drawClinometer(const DeviceState& state) {
     bool n = state.nightMode;
+
+    static constexpr float DISP_ALPHA = 0.3f;
+    _dispPitch = DISP_ALPHA * state.pitchDeg + (1.0f - DISP_ALPHA) * _dispPitch;
+    _dispRoll  = DISP_ALPHA * state.rollDeg  + (1.0f - DISP_ALPHA) * _dispRoll;
+
     int cx   = _W / 3;
     int cy   = _H / 2;
     int maxR = (cx < cy ? cx : cy) - 12;
@@ -93,8 +98,8 @@ void Display::_drawClinometer(const DeviceState& state) {
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
-    int bx = cx - (int)(sinf(state.rollDeg  * kDeg2Rad) * bubbleScale);
-    int by = cy + (int)(sinf(state.pitchDeg * kDeg2Rad) * bubbleScale);
+    int bx = cx - (int)(sinf(_dispPitch * kDeg2Rad) * bubbleScale);
+    int by = cy + (int)(sinf(_dispRoll  * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;
@@ -106,20 +111,23 @@ void Display::_drawClinometer(const DeviceState& state) {
     char abuf[8];
     int px = cx + maxR + 20;
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_WHITE, n));
+    _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setCursor(px, _H *  8 / 135);
     _sprite->print("Pitch");
     _sprite->setFont(&fonts::Font4);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(px, _H * 22 / 135);
-    fmtAngle(abuf, sizeof(abuf), state.pitchDeg);
+    fmtAngle(abuf, sizeof(abuf), _dispPitch);
     _sprite->print(abuf);
 
     _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setCursor(px, _H * 68 / 135);
     _sprite->print("Roll");
     _sprite->setFont(&fonts::Font4);
+    _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setCursor(px, _H * 82 / 135);
-    fmtAngle(abuf, sizeof(abuf), state.rollDeg);
+    fmtAngle(abuf, sizeof(abuf), _dispRoll);
     _sprite->print(abuf);
 
     _sprite->setFont(&fonts::Font0);
@@ -175,24 +183,24 @@ void Display::_drawTime(const DeviceState& state) {
 void Display::_drawRADec(const DeviceState& state) {
     bool n = state.nightMode;
     int mx = _W / 24;   // ≈10px left margin at W=240
-    _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setFont(&fonts::Font2);
-    _sprite->setCursor(mx, _H * 10 / 135);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setCursor(mx, _H * 4 / 135);
     _sprite->print("RA");
 
-    _sprite->setFont(&fonts::Font4);
+    _sprite->setFont(&fonts::DejaVu40);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(mx, _H * 28 / 135);
+    _sprite->setCursor(mx, _H * 22 / 135);
     _sprite->print(state.raText);
 
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_DARKGREY, n));
-    _sprite->setCursor(mx, _H * 72 / 135);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setCursor(mx, _H * 68 / 135);
     _sprite->print("Dec");
 
-    _sprite->setFont(&fonts::Font4);
+    _sprite->setFont(&fonts::DejaVu40);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(mx, _H * 90 / 135);
+    _sprite->setCursor(mx, _H * 86 / 135);
     _sprite->print(state.decText);
 }
 
@@ -200,23 +208,23 @@ void Display::_drawAltAz(const DeviceState& state) {
     bool n = state.nightMode;
     int mx = _W / 24;
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_DARKGREY, n));
-    _sprite->setCursor(mx, _H * 10 / 135);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setCursor(mx, _H * 4 / 135);
     _sprite->print("Alt");
 
-    _sprite->setFont(&fonts::Font4);
+    _sprite->setFont(&fonts::DejaVu40);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(mx, _H * 28 / 135);
+    _sprite->setCursor(mx, _H * 22 / 135);
     _sprite->print(state.altText);
 
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_DARKGREY, n));
-    _sprite->setCursor(mx, _H * 72 / 135);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setCursor(mx, _H * 68 / 135);
     _sprite->print("Az");
 
-    _sprite->setFont(&fonts::Font4);
+    _sprite->setFont(&fonts::DejaVu40);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(mx, _H * 90 / 135);
+    _sprite->setCursor(mx, _H * 86 / 135);
     _sprite->print(state.azText);
 }
 
