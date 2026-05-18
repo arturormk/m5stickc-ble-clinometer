@@ -95,11 +95,22 @@ void Display::_drawClinometer(const DeviceState& state) {
 
     // Bubble position: use sin so the bubble re-centres at ±180° (upside-down level).
     // Scale so sin(3°) == maxR, matching the concentric-circle graduations.
+    //
+    // StickC series: the IMU X axis runs along the physical long axis (case Y).
+    // Rotating around the long axis changes gcy → firmware "roll".
+    // Rotating around the short axis changes gcx → firmware "pitch".
+    // On a portrait screen the long axis is vertical, so the horizontal bubble
+    // position tracks roll and the vertical position tracks pitch — swapped
+    // relative to Core2/CoreS3 where the axes align with the screen directly.
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
-    int bx = cx - (int)(sinf(_dispPitch * kDeg2Rad) * bubbleScale);
-    int by = cy + (int)(sinf(_dispRoll  * kDeg2Rad) * bubbleScale);
+    bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+                  || M5.getBoard() == m5::board_t::board_M5StickCPlus);
+    float hAngle = isStickC ? _dispRoll  : _dispPitch;
+    float vAngle = isStickC ? _dispPitch : _dispRoll;
+    int bx = cx - (int)(sinf(hAngle * kDeg2Rad) * bubbleScale);
+    int by = cy + (int)(sinf(vAngle * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;
