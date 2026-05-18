@@ -59,15 +59,17 @@ void ImuManager::update(DeviceState& state) {
     float gcx, gcy, gcz;
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
 
-    // StickC series: long axis is Y → tipping long axis changes gcy → pitch from gcy.
-    // Other boards (Core2, CoreS3): long axis is X → pitch from gcx.
+    // StickC series: IMU X axis runs along the physical long axis (Y of the case),
+    // so tipping the long end changes gcx → pitch = atan2(-gcx, gcz).
+    // Other boards (Core2, CoreS3): IMU Y axis runs along the physical long axis,
+    // so tipping the long end changes gcy → pitch = atan2(gcy, gcz).
     if (M5.getBoard() == m5::board_t::board_M5StickCPlus2
             || M5.getBoard() == m5::board_t::board_M5StickCPlus) {
-        state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
-        state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
-    } else {
         state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
         state.rollDeg  = atan2f( gcy, gcz) * 57.2957795f;
+    } else {
+        state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
+        state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
     }
 
     state.tiltTimestampMs = now;

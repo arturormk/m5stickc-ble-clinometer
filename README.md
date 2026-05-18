@@ -199,8 +199,10 @@ The first value is **pitch** (tilting the screen toward or away from you — rot
 
 | Device | Pitch formula | Roll formula | Pitch axis | Roll axis |
 |---|---|---|---|---|
-| M5StickC Plus / Plus2 | `atan2(ay, az)` | `atan2(-ax, az)` | Y (long axis) | X (short axis) |
-| Core2, CoreS3, others | `atan2(-ax, az)` | `atan2(ay, az)` | X (long axis) | Y (short axis) |
+| M5StickC Plus / Plus2 | `atan2(-ax, az)` | `atan2(ay, az)` | X | Y |
+| Core2, CoreS3, others | `atan2(ay, az)` | `atan2(-ax, az)` | Y | X |
+
+The IMU inside the StickC series is mounted so that its X axis runs along the physical long axis of the case; tipping the long end therefore changes the X gravity component. Core2 / CoreS3 have the IMU oriented the other way around.
 
 **Reconstructing the acceleration vector** from `TILT <pitch> <roll> <g>`:
 
@@ -210,7 +212,15 @@ The three values are sufficient to recover the full calibrated gravity vector. L
 D = sqrt(cos²β + sin²β · cos²α)
 ```
 
-Then for **M5StickC Plus / Plus2** (Y = pitch axis, X = roll axis):
+Then for **M5StickC Plus / Plus2** (pitch = `atan2(-ax, az)`, roll = `atan2(ay, az)`):
+
+```
+accX = −g · sin(α) · cos(β) / D
+accY = +g · sin(β) · cos(α) / D
+accZ = +g · cos(α) · cos(β) / D
+```
+
+For **Core2, CoreS3, others** (pitch = `atan2(ay, az)`, roll = `atan2(-ax, az)`):
 
 ```
 accX = −g · sin(β) · cos(α) / D
@@ -218,15 +228,7 @@ accY = +g · sin(α) · cos(β) / D
 accZ = +g · cos(α) · cos(β) / D
 ```
 
-For **Core2, CoreS3, others** (X = pitch axis, Y = roll axis):
-
-```
-accX = −g · sin(α) · cos(β) / D
-accY = +g · cos(α) · sin(β) / D
-accZ = +g · cos(α) · cos(β) / D
-```
-
-D equals 1 when either angle is zero and decreases toward the extremes; for angles below ~30° it is within 5% of 1, and the familiar small-angle approximation `accX ≈ ∓g·sin(roll)`, `accY ≈ ±g·sin(pitch)`, `accZ ≈ g` is accurate to the same order.
+D equals 1 when either angle is zero and decreases toward the extremes; for angles below ~30° it is within 5% of 1, and the familiar small-angle approximation `accX ≈ −g·sin(pitch)`, `accY ≈ g·sin(roll)`, `accZ ≈ g` (StickC) or `accX ≈ −g·sin(roll)`, `accY ≈ g·sin(pitch)` (Core2) is accurate to the same order.
 
 When a `CALIBRATE` offset is active, these are in the **calibrated frame of reference** — the origin of pitch = 0, roll = 0 is the stored reference orientation, not the hardware default. `CALIBRATE_RESET` returns to the hardware frame (device flat and face-up).
 
