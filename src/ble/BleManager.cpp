@@ -210,6 +210,8 @@ class BleServerCallbacks : public BLEServerCallbacks {
 // ---------------------------------------------------------------------------
 
 static const char* const kHelpLines[] = {
+    "Commands: (case-insensitive)",
+    "",
     "PING",
     "GET_TILT",
     "CALIBRATE [gx gy gz]",
@@ -233,7 +235,9 @@ static const char* const kHelpLines[] = {
     "STOP_STREAM",
     "SET_NIGHT_MODE ON|OFF",
     "BEEP [<notes...>]",
+    "  e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4",
     "HELP",
+    "",
 };
 static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
 

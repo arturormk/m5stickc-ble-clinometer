@@ -135,9 +135,11 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 
 ```
 → HELP
+← Commands: (case-insensitive)
+←
 ← PING
 ← GET_TILT
-← CALIBRATE
+← CALIBRATE [gx gy gz]
 ← CALIBRATE_RESET
 ← GET_STATUS
 ← GET_TIME
@@ -152,13 +154,15 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
 ←   FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24
 ←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Unicode/Latin-1
-←   no FONT + non-ASCII text: auto-upgrades to goth24 (code 6)
+←   no FONT + non-ASCII text: auto-upgrades to goth24
 ← CANCEL_MSG
 ← START_STREAM <ms>
 ← STOP_STREAM
 ← SET_NIGHT_MODE ON|OFF
 ← BEEP [<notes...>]
+←   e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
 ← HELP
+←
 ← OK
 ```
 

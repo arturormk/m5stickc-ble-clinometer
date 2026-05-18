@@ -50,6 +50,18 @@ async def test_help_synonym(device_addr):
     assert "PING" in lines
 
 
+@pytest.mark.asyncio
+async def test_help_format(device_addr):
+    """HELP output starts with a header line and blank separator, ends with a blank line,
+    and includes a BEEP melody example after the BEEP synopsis."""
+    async with BleSession(device_addr) as s:
+        lines = await _collect_help(s)
+    assert lines[0] == "Commands: (case-insensitive)"
+    assert lines[1] == ""
+    assert lines[-1] == ""
+    assert "  e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4" in lines
+
+
 # ---------------------------------------------------------------------------
 # Query commands
 # ---------------------------------------------------------------------------

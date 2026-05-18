@@ -180,7 +180,7 @@ examples:
   m5ctl night-mode on      # enable red-only night mode
   m5ctl night-mode off     # restore normal colors
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
-  m5ctl beep C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2  # play a melody
+  m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
   m5ctl help               # list all accepted BLE commands
   m5ctl listen             # print all notifications (events, screen changes…)
   m5ctl scan               # discover nearby BLE devices
