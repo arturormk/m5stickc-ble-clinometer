@@ -69,6 +69,9 @@ class DeviceModel:
     w: float          # X half-dimension in OpenGL units (width / 2)
     h: float          # Y half-dimension (height / 2)
     d: float          # Z half-dimension (depth / 2)
+    # 'Y' → M5StickC Plus / Plus2 (long axis Y, pitch=atan2(ay,az), roll=atan2(-ax,az))
+    # 'X' → Core2, CoreS3, others  (long axis X, pitch=atan2(-ax,az), roll=atan2(ay,az))
+    pitch_axis: str   = 'X'
     # Screen inset on the +Z face.  All values are fractions of w or h.
     scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward +X
     scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward +Y
@@ -80,7 +83,7 @@ class DeviceModel:
 # from the USB-C port) and is narrower than the body.
 MODELS = [
     DeviceModel("M5StickC Plus 2", w=27.3/20, h=53.3/20, d=13.5/20,
-                scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
+                pitch_axis='Y', scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
     DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20),
     DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20),
 ]
@@ -91,6 +94,7 @@ MODELS = [
 class TiltState:
     pitch:     float = 0.0
     roll:      float = 0.0
+    g:         float = 1.0   # gravity magnitude in g units from TILT stream
     connected: bool  = False
     error:     str   = ""
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -145,12 +149,13 @@ class BleWorker:
         text = data.decode("utf-8", errors="replace").strip()
         if text.startswith("TILT "):
             parts = text.split()
-            if len(parts) == 3:
+            if len(parts) == 4:
                 try:
-                    p, r = float(parts[1]), float(parts[2])
+                    p, r, g = float(parts[1]), float(parts[2]), float(parts[3])
                     with self._state.lock:
                         self._state.pitch = p
                         self._state.roll  = r
+                        self._state.g     = g
                 except ValueError:
                     pass
 
@@ -282,6 +287,7 @@ class Renderer:
         self,
         pitch: float,
         roll: float,
+        g: float,
         connected: bool,
         error: str,
         demo: bool,
@@ -306,12 +312,24 @@ class Renderer:
         draw_box(model)
         draw_axes(model)
 
-        # Gravity components in device frame reconstructed from pitch/roll
-        P = math.radians(pitch)
-        R = math.radians(roll)
-        gx = -math.sin(P) * math.cos(R)
-        gy =  math.sin(R) * math.cos(P)
-        gz =  math.cos(P) * math.cos(R)
+        # Reconstruct acceleration vector from TILT <pitch> <roll> <g>.
+        # Exact inverse of the firmware's atan2 formulas; see README.md for derivation.
+        # D = sqrt(cos²β + sin²β·cos²α)  where α=pitch, β=roll (both in radians)
+        alpha = math.radians(pitch)
+        beta  = math.radians(roll)
+        D = math.sqrt(math.cos(beta)**2 + math.sin(beta)**2 * math.cos(alpha)**2)
+        if D < 1e-9:
+            ax = ay = az = 0.0
+        elif model.pitch_axis == 'Y':
+            # M5StickC Plus / Plus2: pitch=atan2(ay,az), roll=atan2(-ax,az)
+            ax = -g * math.sin(beta)  * math.cos(alpha) / D
+            ay =  g * math.sin(alpha) * math.cos(beta)  / D
+            az =  g * math.cos(alpha) * math.cos(beta)  / D
+        else:
+            # Core2, CoreS3, others: pitch=atan2(-ax,az), roll=atan2(ay,az)
+            ax = -g * math.sin(alpha) * math.cos(beta)  / D
+            ay =  g * math.cos(alpha) * math.sin(beta)  / D
+            az =  g * math.cos(alpha) * math.cos(beta)  / D
 
         if demo:
             ble_status = "demo mode (no BLE)"
@@ -323,8 +341,8 @@ class Renderer:
             ble_status = "connecting..."
 
         hud_lines = [
-            f"Pitch: {pitch:+7.2f}°   Roll: {roll:+7.2f}°",
-            f"gX: {gx:+.3f}   gY: {gy:+.3f}   gZ: {gz:+.3f}",
+            f"Pitch: {pitch:+7.2f}°   Roll: {roll:+7.2f}°   g: {g:.2f}",
+            f"accX: {ax:+.3f}   accY: {ay:+.3f}   accZ: {az:+.3f}",
             f"BLE: {ble_status}",
             f"Model: {model.name}   [1/2/3] switch  [Q] quit",
         ]
@@ -440,6 +458,7 @@ def main() -> None:
         with state.lock:
             pitch     = state.pitch
             roll      = state.roll
+            g         = state.g
             connected = state.connected
             error     = state.error
 
@@ -447,8 +466,9 @@ def main() -> None:
             t     = pygame.time.get_ticks() / 1000.0
             pitch = 25.0 * math.sin(t * 0.6)
             roll  = 18.0 * math.cos(t * 0.4)
+            g     = 1.0
 
-        renderer.render(pitch, roll, connected, error, demo_mode, model)
+        renderer.render(pitch, roll, g, connected, error, demo_mode, model)
         clock.tick(60)
 
     if worker:
