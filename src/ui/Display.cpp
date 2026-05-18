@@ -147,6 +147,14 @@ void Display::_drawTime(const DeviceState& state) {
     struct tm ti;
     gmtime_r(&t, &ti);
 
+    // Timezone label top-left (prominent, above clock)
+    if (state.timezoneLabel[0] != '\0') {
+        _sprite->setFont(&fonts::Font4);
+        _sprite->setTextColor(_c(TFT_CYAN, n));
+        _sprite->setTextDatum(textdatum_t::top_left);
+        _sprite->drawString(state.timezoneLabel, 10, 5);
+    }
+
     // Time: HH:MM:SS large centered
     char timeBuf[12];
     snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d",
@@ -154,7 +162,7 @@ void Display::_drawTime(const DeviceState& state) {
     _sprite->setFont(&fonts::Font7);
     _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setTextDatum(textdatum_t::middle_center);
-    _sprite->drawString(timeBuf, cx, _H * 50 / 135);
+    _sprite->drawString(timeBuf, cx, _H * 62 / 135);
 
     _sprite->setFont(&fonts::Font2);
     if (state.siderealMode) {
@@ -165,12 +173,9 @@ void Display::_drawTime(const DeviceState& state) {
         char dateBuf[12];
         snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
                  ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+        _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
         _sprite->drawString(dateBuf, cx, _H * 105 / 135);
-        if (state.timezoneLabel[0] != '\0') {
-            _sprite->setTextColor(_c(TFT_DARKGREY, n));
-            _sprite->drawString(state.timezoneLabel, cx, _H * 118 / 135);
-        }
     }
     _sprite->setTextDatum(textdatum_t::top_left);
 }
@@ -364,7 +369,7 @@ void Display::_drawBattery(const DeviceState& state) {
 
     // Title
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_DARKGREY, n));
+    _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setTextDatum(textdatum_t::top_center);
     _sprite->drawString("BATTERY", _W / 2, _H * 8 / 135);
     _sprite->setTextDatum(textdatum_t::top_left);
