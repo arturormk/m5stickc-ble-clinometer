@@ -164,12 +164,7 @@ void Display::_drawTime(const DeviceState& state) {
     _sprite->setTextDatum(textdatum_t::middle_center);
     _sprite->drawString(timeBuf, cx, _H * 62 / 135);
 
-    _sprite->setFont(&fonts::Font2);
-    if (state.siderealMode) {
-        _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
-        const char* lbl = state.timezoneLabel[0] ? state.timezoneLabel : "LST";
-        _sprite->drawString(lbl, cx, _H * 105 / 135);
-    } else {
+    if (!state.siderealMode) {
         char dateBuf[12];
         snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
                  ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);

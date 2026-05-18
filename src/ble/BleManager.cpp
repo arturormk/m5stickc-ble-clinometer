@@ -1,5 +1,6 @@
 #include "BleManager.h"
 #include "../imu/ImuManager.h"
+#include "../system/Nvm.h"
 #include <M5Unified.h>
 #include <time.h>
 #include <string.h>
@@ -236,6 +237,8 @@ static const char* const kHelpLines[] = {
     "SET_NIGHT_MODE ON|OFF",
     "BEEP [<notes...>]",
     "  e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4",
+    "PERSIST [CLEAR|RESTORE|READ]",
+    "REBOOT",
     "HELP",
     "",
 };
@@ -585,6 +588,35 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "CALIBRATE_RESET") == 0) {
             if (s_imu) s_imu->resetCalibration();
             strncpy(resp, "OK CALIBRATION_RESET", sizeof(resp) - 1);
+
+        } else if (strcasecmp(tok, "PERSIST") == 0) {
+            char* sub = strtok_r(nullptr, " ", &saveptr);
+            if (sub && strcasecmp(sub, "READ") == 0) {
+                Nvm::formatStatus(resp, sizeof(resp));
+            } else if (sub && strcasecmp(sub, "CLEAR") == 0) {
+                Nvm::clear();
+                strncpy(resp, "OK CLEARED", sizeof(resp) - 1);
+            } else if (sub && strcasecmp(sub, "RESTORE") == 0) {
+                if (s_imu) Nvm::restore(*s_state, *s_imu);
+                float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+                snprintf(resp, sizeof(resp), "OK RESTORED tz=%s cal=%.4f,%.4f,%.4f sid=%s",
+                         s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
+                         rgx, rgy, rgz,
+                         s_state->siderealMode ? "on" : "off");
+            } else {
+                float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+                if (s_imu) Nvm::saveAll(*s_state, *s_imu);
+                snprintf(resp, sizeof(resp), "OK PERSISTED tz=%s cal=%.4f,%.4f,%.4f sid=%s",
+                         s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
+                         rgx, rgy, rgz,
+                         s_state->siderealMode ? "on" : "off");
+            }
+
+        } else if (strcasecmp(tok, "REBOOT") == 0) {
+            strncpy(resp, "OK REBOOTING", sizeof(resp) - 1);
+            s_state->pendingReboot = true;
 
         } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
             s_state->pendingBleHelpReady = true;

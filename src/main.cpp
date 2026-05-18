@@ -6,6 +6,7 @@
 #include "ui/Display.h"
 #include "system/Buttons.h"
 #include "system/PowerManager.h"
+#include "system/Nvm.h"
 
 // --- Global singletons ---
 DeviceState  g_state;
@@ -68,6 +69,7 @@ void setup() {
     g_display.begin();
     g_imu.begin();
     g_ble.begin(&g_state, &g_imu);
+    Nvm::load(g_state, g_imu);
 }
 
 void loop() {
@@ -85,6 +87,10 @@ void loop() {
     }
 
     g_ble.update(g_state);
+    if (g_state.pendingReboot) {
+        delay(200);   // allow BLE notification to drain before reset
+        ESP.restart();
+    }
     g_display.update(g_state);
     delay(1);
 }

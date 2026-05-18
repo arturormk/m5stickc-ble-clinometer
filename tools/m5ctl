@@ -200,6 +200,11 @@ examples:
   m5ctl night-mode off     # restore normal colors
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
+  m5ctl persist            # save current tz, calibration, sidereal state to NVS
+  m5ctl persist-read       # show stored NVS values (valid flag + all keys)
+  m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
+  m5ctl persist-restore    # re-enable and apply last stored values in-session
+  m5ctl reboot             # software-reset the device
   m5ctl help               # list all accepted BLE commands
   m5ctl listen             # print all notifications (events, screen changes…)
   m5ctl scan               # discover nearby BLE devices
@@ -301,6 +306,12 @@ examples:
     p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
     p.add_argument("state", choices=["on", "off"], help="on or off")
 
+    sub.add_parser("persist",         help="Save current tz, calibration and sidereal state to NVS")
+    sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
+    sub.add_parser("persist-clear",   help="Invalidate stored values with a single NVS write")
+    sub.add_parser("persist-restore", help="Re-enable and apply last stored NVS values in-session")
+    sub.add_parser("reboot",          help="Software-reset the device")
+
     p = sub.add_parser("beep",
                        help="Play a beep or melody (beep [note ...])")
     p.add_argument("notes", nargs="*",
@@ -396,6 +407,16 @@ examples:
         case "beep":
             cmd = "BEEP " + " ".join(args.notes) if args.notes else "BEEP"
             do_send(args, cmd)
+        case "persist":
+            do_send(args, "PERSIST")
+        case "persist-read":
+            do_send(args, "PERSIST READ")
+        case "persist-clear":
+            do_send(args, "PERSIST CLEAR")
+        case "persist-restore":
+            do_send(args, "PERSIST RESTORE")
+        case "reboot":
+            do_send(args, "REBOOT")
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
         case "scan":

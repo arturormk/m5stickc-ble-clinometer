@@ -67,6 +67,8 @@ struct DeviceState {
     uint8_t  messageAwaitButtons; // bitmask: BTN_MASK_*
     uint8_t  messageFontCode;    // 0/2=Font4(def) 1=Font2 3=Font6 4=Font8 5=JGoth16 6=JGoth24
 
+    bool     pendingReboot;
+
     volatile char pendingBleResponse[160];
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];

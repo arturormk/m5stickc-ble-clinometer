@@ -20,7 +20,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
-- **Persists time across power cycles** — `SET_TIME` writes the UTC time to the on-board PCF8563 RTC chip; on the next boot the device restores the clock automatically without needing a BLE reconnect
+- **Persists settings across power cycles** — the clock is stored in the on-board PCF8563 RTC chip and restored automatically on every boot. The timezone label, calibration reference vector, and sidereal time can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all three without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot
 
 ## Hardware
 
@@ -72,7 +72,7 @@ The **M5 front button** cycles through screens in order:
 | # | Screen | Description |
 |---|---|---|
 | 0 | Clinometer | Bubble level with 1°/2°/3° rings, numeric Pitch/Roll readout |
-| 1 | Time | Current time (HH:MM:SS) — solar or sidereal — and date or label set via BLE |
+| 1 | Time | Current time HH:MM:SS; timezone/LST label in cyan top-left (if set). Solar: date below the digits. Sidereal: no date. |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
 | 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
@@ -161,6 +161,8 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← SET_NIGHT_MODE ON|OFF
 ← BEEP [<notes...>]
 ←   e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
+← PERSIST [CLEAR|RESTORE|READ]
+← REBOOT
 ← HELP
 ←
 ← OK
@@ -221,13 +223,12 @@ With three arguments, restores a previously saved reference vector directly — 
 ← CALIBRATED +0.0023 -0.0150 +0.9999
 ```
 
-Both forms return the same `CALIBRATED gx gy gz` format, so the workflow for precalibration is:
+Both forms return the same `CALIBRATED gx gy gz` format. The calibration is held in RAM and is cleared on reboot. To survive a power cycle, either:
 
-1. Position the device at the desired reference orientation.
-2. Send `CALIBRATE` and record the three numbers from the response.
-3. After any reboot, send `CALIBRATE <those three numbers>` to restore the same calibration instantly.
+- Send `PERSIST` after calibrating — the device restores the calibration automatically on the next boot, or
+- Record the three numbers from the response and send `CALIBRATE <gx> <gy> <gz>` after each reboot to restore manually.
 
-Calibration is implemented as a 3×3 Rodrigues rotation matrix applied to the raw accelerometer vector before angle extraction. It works correctly for any starting orientation — not just small corrections. The calibration is held in RAM and is lost on reboot.
+Calibration is implemented as a 3×3 Rodrigues rotation matrix applied to the raw accelerometer vector before angle extraction. It works correctly for any starting orientation — not just small corrections.
 
 ---
 
@@ -335,7 +336,7 @@ Sets the device clock. The device ticks locally from this point.
 
 The datetime part is always `YYYY-MM-DDTHH:MM:SS` and is stored at face value — the device performs no UTC conversion. The optional timezone label is display-only: it appears on the time screen below the date and is not interpreted by the firmware.
 
-The time is also written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and restores the clock automatically, so `SET_TIME` does not need to be re-issued after a reboot. The timezone label is not stored in the RTC and is not restored on boot. `SET_SIDEREAL_TIME` does not write to the RTC — sidereal time differs from solar time and has no calendar date.
+The time is also written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and restores the clock automatically, so `SET_TIME` does not need to be re-issued after a reboot. The timezone label is not stored in the RTC; it is lost on reboot unless `PERSIST` has been used to save it to NVM. `SET_SIDEREAL_TIME` does not write to the RTC — sidereal time differs from solar time and has no calendar date.
 
 | Suffix | Label shown | Example |
 |---|---|---|
@@ -364,6 +365,8 @@ Switches the device clock to sidereal mode, advancing at the sidereal rate (≈ 
 ```
 
 Time is stored at face value and ticked forward at the sidereal rate. Use `SET_TIME` to leave sidereal mode and return to solar time.
+
+Sidereal mode is lost on reboot unless `PERSIST` is used. When persisted, the device stores the LST value and the RTC epoch at the moment of the `PERSIST` call as an anchor; on the next boot it reconstructs the current LST by computing elapsed solar seconds from the RTC and scaling by the sidereal ratio (≈ 1.002738), so the clock continues correctly rather than resuming from the stored snapshot. This requires the RTC to have a valid time; if the RTC has never been set, sidereal restoration is skipped gracefully.
 
 ---
 
@@ -578,6 +581,72 @@ Up to 32 notes per command.
 
 ---
 
+### `PERSIST [CLEAR|RESTORE|READ]`
+
+Manages non-volatile storage of user settings. Three values can be persisted: the **timezone label**, the **calibration reference vector**, and the **sidereal time reference**. NVM writes happen only on an explicit `PERSIST` command — no write occurs during `SET_TIME`, `SET_SIDEREAL_TIME`, `CALIBRATE`, or `CALIBRATE_RESET`.
+
+#### `PERSIST`
+
+Saves the current timezone label, calibration reference vector, and (if in sidereal mode) the sidereal time anchor to NVM. Data keys are written first; the validity flag is written last so a power loss mid-write leaves NVM in a clean invalid state.
+
+```
+→ PERSIST
+← OK PERSISTED tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=off
+```
+
+On the next power-on the device restores all three values automatically. Sidereal restoration computes elapsed sidereal time from the stored anchor and the current RTC reading, so the clock continues from where it would have been rather than from the raw stored value.
+
+#### `PERSIST CLEAR`
+
+Invalidates all stored NVM settings with a **single flash write** (sets an internal validity byte to 0). Data keys are left in flash but ignored on boot. This is the lowest-wear way to clear settings.
+
+```
+→ PERSIST CLEAR
+← OK CLEARED
+```
+
+#### `PERSIST RESTORE`
+
+Re-enables the stored NVM settings (sets the validity byte back to 1) and immediately applies them to the current device state — **no reboot required**. The response shows the values that were applied.
+
+```
+→ PERSIST RESTORE
+← OK RESTORED tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=off
+```
+
+Useful after `PERSIST CLEAR` to roll back without rebooting: the data keys are still in flash and can be re-activated in-session with one write.
+
+#### `PERSIST READ`
+
+Returns the current NVM contents without modifying anything. Shows the validity flag and all stored keys. If `valid=0` the data is present in flash but will not be applied on the next boot.
+
+```
+→ PERSIST READ
+← PERSIST valid=1 tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=on lst=05:30:00 rtc=2025-05-18T12:00:00Z
+```
+
+| Field | Meaning |
+|---|---|
+| `valid` | `1` = data will be restored on next boot; `0` = data ignored |
+| `tz` | Stored timezone label, or `(none)` |
+| `cal` | Stored calibration reference vector `gx,gy,gz`, or `(none)` for identity |
+| `sid` | `on` = sidereal mode was active at persist time; `off` = solar |
+| `lst` | Stored LST anchor as `HH:MM:SS`, or `(none)` |
+| `rtc` | RTC wall-clock epoch at persist time (ISO 8601 UTC), or `(none)` |
+
+---
+
+### `REBOOT`
+
+Performs a software reset. The device sends `OK REBOOTING`, waits ~200 ms for the notification to be delivered, then calls `ESP.restart()`. The BLE connection drops and the device re-advertises after boot. Any settings saved with `PERSIST` are restored automatically.
+
+```
+→ REBOOT
+← OK REBOOTING
+```
+
+---
+
 ## Asynchronous Events
 
 The device can send unsolicited notifications on the Response characteristic. Subscribe to notifications to receive them.
@@ -683,6 +752,11 @@ options:
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
 | `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
+| `persist` | | Save current timezone, calibration, and sidereal state to NVM |
+| `persist-read` | | Show stored NVM values (validity flag and all keys) |
+| `persist-clear` | | Invalidate stored NVM settings with a single flash write |
+| `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
+| `reboot` | | Software-reset the device |
 | `scan` | | Scan for nearby BLE devices |
 
 Examples:
@@ -704,6 +778,11 @@ uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
 uv run tools/m5ctl beep
 uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
+uv run tools/m5ctl persist                # save tz + calibration + sidereal to NVM
+uv run tools/m5ctl persist-read           # inspect NVM contents
+uv run tools/m5ctl persist-clear          # invalidate NVM (1 flash write)
+uv run tools/m5ctl persist-restore        # re-enable and apply stored NVM values
+uv run tools/m5ctl reboot                 # software-reset the device
 uv run tools/m5ctl listen --stream 500
 uv run tools/m5ctl listen
 ```
@@ -798,6 +877,19 @@ uv run pytest tests/test_newline.py
 uv run pytest tests/test_sanitize.py
 ```
 
+### Persistence tests (`test_persistence.py`)
+
+`tests/test_persistence.py` exercises the `PERSIST` command family and `REBOOT`. It is **excluded from the default `pytest` run** and must be invoked explicitly:
+
+```bash
+uv run pytest tests/test_persistence.py
+uv run pytest tests/test_persistence.py --device AA:BB:CC:DD:EE:FF
+```
+
+The reason it is excluded is flash wear: every `PERSIST` or `PERSIST CLEAR` command writes to the ESP32 NVS flash. Running these tests on every CI or development `pytest` invocation would accumulate unnecessary write cycles. The exclusion is implemented via `addopts = "--ignore=tests/test_persistence.py"` in `pyproject.toml`; pytest's own rules ensure that an explicitly-supplied path on the command line overrides `--ignore`, so `pytest tests/test_persistence.py` still collects and runs all 12 tests.
+
+Each test in the file is preceded by an autouse fixture that sends `PERSIST CLEAR` over BLE, giving every test a known starting state (`valid=0` in NVM) regardless of what prior tests left behind. The two reboot tests (`test_persist_survives_reboot` and `test_clear_survives_reboot`) send the `REBOOT` command, wait 5 seconds for the device to restart and re-advertise, then reconnect and verify the NVM state that the boot loader applied.
+
 Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 ---
@@ -823,7 +915,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   └── Display.cpp    All six screen renderers (sprite-buffered via M5GFX)
 │   └── system/
 │       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, power-off
-│       └── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
+│       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
+│       └── Nvm.h/.cpp           NVM persistence (Preferences, namespace "clino")
 ├── tools/
 │   └── m5ctl              Python 3 BLE command-line client
 ├── tests/
@@ -841,8 +934,9 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering; sprites are allocated at **8-bit (palette) colour depth** so the full-screen buffer fits in internal SRAM on all supported display sizes — a 320×240 sprite at 16-bit would require ~150 KB, which cannot be allocated alongside the BLE stack on the ESP32; at 8-bit it drops to ~75 KB. All standard colours (black, white, red, green, yellow, grey variants) map exactly or near-exactly to the 216-entry web-safe palette used in this mode. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
-- All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable there since the device is about to power off).
-- Flash usage: ~40% of 3 MB. RAM usage: ~13% of 320 KB.
+- Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library, namespace `"clino"`. The `huge_app.csv` partition table reserves 20 KB for NVS — the settings payload is under 50 bytes. NVS writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
+- All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, the 200 ms drain wait before `ESP.restart()` on `REBOOT`, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable in both cases since the device is about to reset or power off).
+- Flash usage: ~55% of 3 MB. RAM usage: ~13% of 320 KB.
 
 ---
 
