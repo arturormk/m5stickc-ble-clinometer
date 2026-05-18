@@ -20,6 +20,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
+- **Plays a brief startup tone** on boot (single 3600 Hz beep) to confirm speaker initialisation; volume is tuned per board family (lower for louder models such as the M5Stack)
 - **Persists settings across power cycles** — the clock is stored in the on-board PCF8563 RTC chip and restored automatically on every boot. The timezone label, calibration reference vector, and sidereal time can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all three without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot
 
 ## Hardware
