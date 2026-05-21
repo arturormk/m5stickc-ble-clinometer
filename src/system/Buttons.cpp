@@ -19,7 +19,7 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
         }
     }
 
-    // Side button (BtnB = GPIO 39): short press = reboot, long press = deep sleep
+    // Side button (BtnB = GPIO 39): short press = reboot (not Core2, which has a hw reset), long press = deep sleep
     bool topDown = M5.BtnB.isPressed();
     if (topDown) {
         if (!_topHeld) {
@@ -32,7 +32,9 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
         if (_topHeld) {
             _topHeld = false;
             if ((millis() - _topPressStartMs) < LONG_PRESS_MS) {
-                power.reboot();
+                if (M5.getBoard() != m5::board_t::board_M5StackCore2) {
+                    power.reboot();
+                }
             }
         }
     }
