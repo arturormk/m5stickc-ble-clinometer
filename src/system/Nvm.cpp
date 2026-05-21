@@ -2,10 +2,13 @@
 #include <Preferences.h>
 #include <M5Unified.h>
 #include <time.h>
+#include <math.h>
+#include <esp_timer.h>
 
 static const char* kNs = "clino";
 
-static uint32_t readRtcEpoch() {
+// Read the hardware RTC and return a UTC epoch, or 0 if unavailable / not set.
+static time_t readRtcEpoch() {
     if (!M5.Rtc.isEnabled() || M5.Rtc.getVoltLow()) return 0;
     m5::rtc_datetime_t dt;
     if (!M5.Rtc.getDateTime(&dt) || dt.date.year < 2020) return 0;
@@ -17,8 +20,31 @@ static uint32_t readRtcEpoch() {
     utc.tm_min   = dt.time.minutes;
     utc.tm_sec   = dt.time.seconds;
     utc.tm_isdst = 0;
-    time_t t = mktime(&utc);
-    return (t > 0) ? (uint32_t)t : 0;
+    time_t t = mktime(&utc);   // TZ=UTC0 makes this behave as timegm
+    return (t > 0) ? t : 0;
+}
+
+void Nvm::rebuildAnchor(DeviceState& s) {
+    time_t utc = readRtcEpoch();
+    s.utcAnchorSec = utc;
+    s.anchorUs     = esp_timer_get_time();
+
+    if (utc == 0) {
+        s.lstPhaseQ40 = 0;
+        return;
+    }
+
+    // Linear GMST formula: error < 0.006 s at year 2100 — adequate for amateur use.
+    double lon  = isnan(s.longitudeDeg) ? 0.0 : (double)s.longitudeDeg;
+    int64_t dt  = (int64_t)utc - (int64_t)J2000_UNIX_SEC;
+    double gmst = fmod(GMST_J2000_SEC + (double)dt * 1.002737909350795, 86400.0);
+    if (gmst < 0.0) gmst += 86400.0;
+    double lst  = fmod(gmst + lon * 240.0, 86400.0);
+    if (lst  < 0.0) lst  += 86400.0;
+
+    double fraction = lst / 86400.0;
+    s.lstPhaseQ40 = (uint64_t)(fraction * (double)SIDEREAL_SCALE_Q40 + 0.5)
+                    & (SIDEREAL_SCALE_Q40 - 1ULL);
 }
 
 void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
@@ -36,9 +62,9 @@ void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
         gz = prefs.getFloat("cal_gz", 1.0f);
     }
 
-    uint8_t  sidOn  = prefs.getUChar("sid_on",  0);
-    uint32_t sidLst = prefs.getULong("sid_lst",  0);
-    uint32_t sidRtc = prefs.getULong("sid_rtc",  0);
+    int32_t tzOffset = prefs.getInt("tz_offset", 0);
+    bool    hasLon   = prefs.isKey("longitude");
+    float   lon      = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
 
     prefs.end();
 
@@ -46,23 +72,20 @@ void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
         strncpy(state.timezoneLabel, tz.c_str(), sizeof(state.timezoneLabel) - 1);
         state.timezoneLabel[sizeof(state.timezoneLabel) - 1] = '\0';
     }
+    state.timezoneOffsetSec = tzOffset;
+    state.longitudeDeg      = lon;
 
     if (hasCal) {
         imu.calibrateFrom(gx, gy, gz);
     }
 
-    if (sidOn == 1 && sidRtc > 0) {
-        uint32_t nowRtc = readRtcEpoch();
-        if (nowRtc >= sidRtc) {
-            int64_t elapsedSolar = (int64_t)(nowRtc - sidRtc);
-            int64_t elapsedSid   = elapsedSolar * 1002738LL / 1000000LL;
-            int64_t lstNow       = ((int64_t)sidLst + elapsedSid) % 86400LL;
-            if (lstNow < 0) lstNow += 86400LL;
-            state.timeEpochSec    = (time_t)lstNow;
-            state.timeSetAtMillis = millis();
-            state.siderealMode    = true;
-        }
+    // Derive sidereal mode from label; fix label if longitude is absent.
+    bool isSid = (strcmp(state.timezoneLabel, "LST") == 0 ||
+                  strcmp(state.timezoneLabel, "GST") == 0);
+    if (isSid && isnan(state.longitudeDeg)) {
+        strncpy(state.timezoneLabel, "GST", sizeof(state.timezoneLabel) - 1);
     }
+    state.siderealMode = isSid;
 }
 
 void Nvm::load(DeviceState& state, ImuManager& imu) {
@@ -70,33 +93,26 @@ void Nvm::load(DeviceState& state, ImuManager& imu) {
     prefs.begin(kNs, true);
     uint8_t valid = prefs.getUChar("valid", 0);
     prefs.end();
-    if (valid != 1) return;
-    _applyData(state, imu);
+    if (valid == 1) _applyData(state, imu);
+    rebuildAnchor(state);   // always rebuild from RTC regardless of NVS state
 }
 
 bool Nvm::saveAll(const DeviceState& state, ImuManager& imu) {
     float gx, gy, gz;
     imu.getCalibrationRef(gx, gy, gz);
 
-    uint8_t  sidOn  = state.siderealMode ? 1 : 0;
-    uint32_t sidLst = 0;
-    uint32_t sidRtc = 0;
-    if (sidOn) {
-        time_t cur = deviceCurrentTime(state);
-        sidLst = (uint32_t)(cur % 86400);
-        sidRtc = readRtcEpoch();
-    }
-
     Preferences prefs;
     prefs.begin(kNs, false);
-    prefs.putString("tz",      state.timezoneLabel);
-    prefs.putFloat ("cal_gx",  gx);
-    prefs.putFloat ("cal_gy",  gy);
-    prefs.putFloat ("cal_gz",  gz);
-    prefs.putUChar ("sid_on",  sidOn);
-    prefs.putULong ("sid_lst", sidLst);
-    prefs.putULong ("sid_rtc", sidRtc);
-    prefs.putUChar ("valid",   1);   // written last — atomic commit
+    prefs.putString("tz",        state.timezoneLabel);
+    prefs.putInt   ("tz_offset", state.timezoneOffsetSec);
+    prefs.putFloat ("cal_gx",    gx);
+    prefs.putFloat ("cal_gy",    gy);
+    prefs.putFloat ("cal_gz",    gz);
+    if (!isnan(state.longitudeDeg))
+        prefs.putFloat("longitude", state.longitudeDeg);
+    else
+        prefs.remove("longitude");
+    prefs.putUChar("valid", 1);   // written last — atomic commit
     prefs.end();
     return true;
 }
@@ -114,6 +130,7 @@ void Nvm::restore(DeviceState& state, ImuManager& imu) {
     prefs.putUChar("valid", 1);
     prefs.end();
     _applyData(state, imu);
+    rebuildAnchor(state);
 }
 
 void Nvm::formatStatus(char* buf, size_t len) {
@@ -130,29 +147,11 @@ void Nvm::formatStatus(char* buf, size_t len) {
         gy = prefs.getFloat("cal_gy", 0.0f);
         gz = prefs.getFloat("cal_gz", 1.0f);
     }
-    uint8_t  sidOn  = prefs.getUChar("sid_on",  0);
-    uint32_t sidLst = prefs.getULong("sid_lst",  0);
-    uint32_t sidRtc = prefs.getULong("sid_rtc",  0);
+    int32_t tzOffset = prefs.getInt("tz_offset", 0);
+    bool    hasLon   = prefs.isKey("longitude");
+    float   lon      = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
 
     prefs.end();
-
-    // Format lst as HH:MM:SS
-    char lstBuf[12] = "(none)";
-    if (sidOn && sidLst < 86400) {
-        uint32_t h = sidLst / 3600, m = (sidLst % 3600) / 60, s = sidLst % 60;
-        snprintf(lstBuf, sizeof(lstBuf), "%02u:%02u:%02u", h, m, s);
-    }
-
-    // Format sid_rtc anchor as ISO8601 UTC
-    char rtcBuf[24] = "(none)";
-    if (sidOn && sidRtc > 0) {
-        time_t t = (time_t)sidRtc;
-        struct tm utc;
-        gmtime_r(&t, &utc);
-        snprintf(rtcBuf, sizeof(rtcBuf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                 utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
-                 utc.tm_hour, utc.tm_min, utc.tm_sec);
-    }
 
     char calBuf[40];
     if (hasCal)
@@ -160,12 +159,17 @@ void Nvm::formatStatus(char* buf, size_t len) {
     else
         snprintf(calBuf, sizeof(calBuf), "(none)");
 
+    char lonBuf[16];
+    if (hasLon)
+        snprintf(lonBuf, sizeof(lonBuf), "%.4f", lon);
+    else
+        snprintf(lonBuf, sizeof(lonBuf), "(none)");
+
     snprintf(buf, len,
-             "PERSIST valid=%d tz=%s cal=%s sid=%s lst=%s rtc=%s",
+             "PERSIST valid=%d tz=%s tz_offset=%d lon=%s cal=%s",
              valid,
              hasTz && tz.length() ? tz.c_str() : "(none)",
-             calBuf,
-             sidOn ? "on" : "off",
-             lstBuf,
-             rtcBuf);
+             tzOffset,
+             lonBuf,
+             calBuf);
 }

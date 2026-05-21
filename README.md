@@ -21,7 +21,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
 - **Plays a brief startup tone** on boot (single 3600 Hz beep) to confirm speaker initialisation; volume is tuned per board family (lower for louder models such as the M5Stack)
-- **Persists settings across power cycles** — the clock is stored in the on-board PCF8563 RTC chip and restored automatically on every boot. The timezone label, calibration reference vector, and sidereal time can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all three without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot
+- **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, and calibration reference vector can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot
 
 ## Hardware
 
@@ -147,8 +147,9 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← GET_RADEC
 ← GET_ALTAZ
 ← GET_MSG
-← SET_TIME <ISO8601> [<tz>]
-← SET_SIDEREAL_TIME <HH:MM:SS> [<label>]
+← SET_TIME <ISO8601+offset> [<label>]
+← SET_TIME_ZONE <+HH:MM|-HH:MM|UTC|LST> [label]
+← SET_LONGITUDE <degrees|NONE>
 ← SET_RADEC <ra> <dec>
 ← SET_ALTAZ <alt> <az>
 ← SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
@@ -295,27 +296,30 @@ Returns a one-line summary of device state.
 
 ### `GET_TIME`
 
-Returns the current time as set by `SET_TIME` or `SET_SIDEREAL_TIME`, ticking locally since then.
+Returns the current time, ticking locally since the last `SET_TIME`.
 
-The response format depends on the active mode and the timezone label stored at set-time:
+The response format depends on the active mode:
 
 | Mode | Example response |
 |---|---|
-| UTC (label `UTC` or none) | `TIME 2026-04-19T18:42:10Z` |
-| Local/named timezone | `TIME 2026-04-19T18:42:10 JST` |
-| Numeric offset | `TIME 2026-04-19T17:42:10 +01:00` |
-| Sidereal | `TIME 18:42:10 LST` |
+| Solar, no time set | `TIME NONE` |
+| Solar | `TIME 2026-04-19T18:42:10Z` |
+| Sidereal, longitude configured | `TIME 18:42:10 LST` |
+| Sidereal, no longitude | `TIME 18:42:10 GST` |
 
 ```
 → GET_TIME
-← TIME 2026-04-19T18:42:10Z       (UTC)
-← TIME 2026-04-19T18:42:10 JST    (local timezone label)
-← TIME 18:42:10 LST               (sidereal — no date)
+← TIME 2026-04-19T18:42:10Z       (solar — always UTC with Z suffix)
+← TIME 18:42:10 LST               (sidereal with longitude — no date)
+← TIME 18:42:10 GST               (sidereal without longitude — no date)
+← TIME NONE                       (no time set yet)
 ```
 
-In sidereal mode the date is omitted entirely, as sidereal time has no calendar date. The label shown is whatever was passed to `SET_SIDEREAL_TIME` (default `LST`).
+Solar mode **always returns UTC with a `Z` suffix**. The device never returns local time from this command; the client applies its own UTC offset for display purposes. Use `SET_TIME_ZONE` to configure the local offset for the on-device TIME screen.
 
-Returns `TIME NONE` if no time has been set since boot (solar mode only; sidereal midnight `00:00:00` is reported normally).
+In sidereal mode the date is omitted. The label is `LST` (Local Sidereal Time) when an observer longitude has been configured via `SET_LONGITUDE`, or `GST` (Greenwich Sidereal Time) when no longitude has been set.
+
+Returns `TIME NONE` if no time has been set since boot.
 
 ---
 
@@ -361,9 +365,9 @@ The second field is the remaining lifetime in seconds, or `INF` for a persistent
 
 ---
 
-### `SET_TIME <iso8601> [<tz>]`
+### `SET_TIME <iso8601> [<label>]`
 
-Sets the device clock. The device ticks locally from this point.
+Sets the device clock to the given UTC time and switches to solar mode. The device ticks locally from this point.
 
 ```
 → SET_TIME 2026-05-14T12:30:00Z
@@ -378,39 +382,73 @@ Sets the device clock. The device ticks locally from this point.
 ← ERR BAD_TIME
 ```
 
-The datetime part is always `YYYY-MM-DDTHH:MM:SS` and is stored at face value — the device performs no UTC conversion. The optional timezone label is display-only: it appears on the time screen below the date and is not interpreted by the firmware.
+The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. A space-separated label token is accepted for display purposes and does not affect the stored UTC time.
 
-The time is also written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and restores the clock automatically, so `SET_TIME` does not need to be re-issued after a reboot. The timezone label is not stored in the RTC; it is lost on reboot unless `PERSIST` has been used to save it to NVM. `SET_SIDEREAL_TIME` does not write to the RTC — sidereal time differs from solar time and has no calendar date.
+The UTC time is written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and rebuilds the running clock automatically. The timezone label and UTC offset are not stored in the RTC; use `PERSIST` to save them to NVM.
 
-| Suffix | Label shown | Example |
-|---|---|---|
-| `Z` | `UTC` | `2026-05-14T12:30:00Z` |
-| `+HH:MM` / `-HH:MM` | the offset string | `2026-05-14T12:30:00+01:00` |
-| separate token | the token | `2026-05-14T12:30:00 CET` |
-| (none) | nothing | `2026-05-14T12:30:00` |
+| Suffix | UTC stored | Label default | Example |
+|---|---|---|---|
+| `Z` | Datetime as-is | `UTC` | `2026-05-14T12:30:00Z` |
+| `+HH:MM` / `-HH:MM` | Offset subtracted | offset string | `2026-05-14T12:30:00+01:00` |
+| separate token | Datetime as-is | the token | `2026-05-14T12:30:00 CET` |
+| (none) | Datetime as-is | nothing | `2026-05-14T12:30:00` |
 
-No DST logic is applied; the timezone string is purely informational.
+No DST logic is applied. To change the display timezone after setting the time, use `SET_TIME_ZONE` — there is no need to re-send `SET_TIME`.
 
 ---
 
-### `SET_SIDEREAL_TIME <HH:MM:SS> [<label>]`
+### `SET_TIME_ZONE <spec> [<label>]`
 
-Switches the device clock to sidereal mode, advancing at the sidereal rate (≈ 366.2422/365.2422 × solar rate). The calendar date is suppressed on screen; the label (default `LST`) is shown in its place.
+Sets the display timezone or switches to sidereal mode. Does not alter the stored UTC time.
 
 ```
-→ SET_SIDEREAL_TIME 14:32:00
-← OK SIDEREAL
+→ SET_TIME_ZONE +09:00
+← OK TIMEZONE
 
-→ SET_SIDEREAL_TIME 14:32:00 LST
-← OK SIDEREAL
+→ SET_TIME_ZONE +09:00 JST
+← OK TIMEZONE
 
-← ERR BAD_TIME
+→ SET_TIME_ZONE UTC
+← OK TIMEZONE
+
+→ SET_TIME_ZONE LST
+← OK TIMEZONE
+
 ← ERR BAD_ARGS
 ```
 
-Time is stored at face value and ticked forward at the sidereal rate. Use `SET_TIME` to leave sidereal mode and return to solar time.
+| `<spec>` | Effect |
+|---|---|
+| `+HH:MM` / `-HH:MM` | Solar mode; sets UTC offset in seconds; label defaults to the offset string |
+| `UTC` | Solar mode; UTC offset = 0; label `UTC` |
+| `LST` | Sidereal mode; label is `LST` if a longitude is configured, else `GST` |
 
-Sidereal mode is lost on reboot unless `PERSIST` is used. When persisted, the device stores the LST value and the RTC epoch at the moment of the `PERSIST` call as an anchor; on the next boot it reconstructs the current LST by computing elapsed solar seconds from the RTC and scaling by the sidereal ratio (≈ 1.002738), so the clock continues correctly rather than resuming from the stored snapshot. This requires the RTC to have a valid time; if the RTC has never been set, sidereal restoration is skipped gracefully.
+The optional second token overrides the display label shown in the top-left of the TIME screen (e.g. `SET_TIME_ZONE +09:00 JST` shows `JST`). The label is informational only; the UTC offset is what drives the clock arithmetic.
+
+Timezone changes take effect immediately for the TIME screen and `GET_TIME`. Use `PERSIST` to save the setting across reboots.
+
+---
+
+### `SET_LONGITUDE <degrees|NONE>`
+
+Sets the observer longitude used for Local Sidereal Time computation, or clears it.
+
+```
+→ SET_LONGITUDE 135.5
+← OK LONGITUDE
+
+→ SET_LONGITUDE -3.7
+← OK LONGITUDE
+
+→ SET_LONGITUDE NONE
+← OK LONGITUDE
+
+← ERR BAD_ARGS   (out of ±180° range or non-numeric)
+```
+
+Degrees east of Greenwich; negative for west. Valid range is −180.0 to +180.0. Once set, `GET_TIME` in sidereal mode returns `HH:MM:SS LST` instead of `GST`, and the TIME screen label switches accordingly. `NONE` clears the longitude (reverts to GST mode if sidereal is active).
+
+Use `PERSIST` to save the longitude across reboots.
 
 ---
 
@@ -627,18 +665,19 @@ Up to 32 notes per command.
 
 ### `PERSIST [CLEAR|RESTORE|READ]`
 
-Manages non-volatile storage of user settings. Three values can be persisted: the **timezone label**, the **calibration reference vector**, and the **sidereal time reference**. NVM writes happen only on an explicit `PERSIST` command — no write occurs during `SET_TIME`, `SET_SIDEREAL_TIME`, `CALIBRATE`, or `CALIBRATE_RESET`.
+Manages non-volatile storage of user settings. Four values can be persisted: the **timezone label**, **UTC offset**, **observer longitude**, and **calibration reference vector**. NVM writes happen only on an explicit `PERSIST` command — no write occurs during `SET_TIME`, `SET_TIME_ZONE`, `SET_LONGITUDE`, `CALIBRATE`, or `CALIBRATE_RESET`.
 
 #### `PERSIST`
 
-Saves the current timezone label, calibration reference vector, and (if in sidereal mode) the sidereal time anchor to NVM. Data keys are written first; the validity flag is written last so a power loss mid-write leaves NVM in a clean invalid state.
+Saves the current timezone label, UTC offset, observer longitude, and calibration reference vector to NVM. Data keys are written first; the validity flag is written last so a power loss mid-write leaves NVM in a clean invalid state.
 
 ```
 → PERSIST
-← OK PERSISTED tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=off
+← OK PERSISTED tz=JST tz_offset=32400 lon=135.5000 cal=+0.0023,-0.0150,+0.9999
+← OK PERSISTED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
 ```
 
-On the next power-on the device restores all three values automatically. Sidereal restoration computes elapsed sidereal time from the stored anchor and the current RTC reading, so the clock continues from where it would have been rather than from the raw stored value.
+On the next power-on the device restores all saved values automatically. The UTC time itself is always recovered from the hardware RTC; sidereal phase is recomputed from UTC + longitude using the GMST formula, so the sidereal clock continues correctly without any stored sidereal state.
 
 #### `PERSIST CLEAR`
 
@@ -655,7 +694,7 @@ Re-enables the stored NVM settings (sets the validity byte back to 1) and immedi
 
 ```
 → PERSIST RESTORE
-← OK RESTORED tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=off
+← OK RESTORED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
 ```
 
 Useful after `PERSIST CLEAR` to roll back without rebooting: the data keys are still in flash and can be re-activated in-session with one write.
@@ -666,17 +705,16 @@ Returns the current NVM contents without modifying anything. Shows the validity 
 
 ```
 → PERSIST READ
-← PERSIST valid=1 tz=UTC cal=+0.0023,-0.0150,+0.9999 sid=on lst=05:30:00 rtc=2025-05-18T12:00:00Z
+← PERSIST valid=1 tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
 ```
 
 | Field | Meaning |
 |---|---|
 | `valid` | `1` = data will be restored on next boot; `0` = data ignored |
 | `tz` | Stored timezone label, or `(none)` |
+| `tz_offset` | UTC offset in seconds (e.g. `32400` = JST +09:00; `0` = UTC) |
+| `lon` | Observer longitude °East, or `(none)` when not configured |
 | `cal` | Stored calibration reference vector `gx,gy,gz`, or `(none)` for identity |
-| `sid` | `on` = sidereal mode was active at persist time; `off` = solar |
-| `lst` | Stored LST anchor as `HH:MM:SS`, or `(none)` |
-| `rtc` | RTC wall-clock epoch at persist time (ISO 8601 UTC), or `(none)` |
 
 ---
 
@@ -784,9 +822,10 @@ options:
 | `get-radec` | | Get stored RA/Dec values |
 | `get-altaz` | | Get stored Alt/Az values |
 | `get-msg` | | Get current message state |
-| `set-time` | `<iso8601> [<tz>]` | Set device clock; optional timezone label for display |
-| `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time |
-| `set-sidereal-now` | `--longitude DEG [--dut1 SEC] [--label STR] [--offset N]` | Set device to current Local Sidereal Time |
+| `set-time` | `<iso8601> [<label>]` | Set device clock (offset subtracted to store UTC); optional label for display |
+| `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time (sends local UTC offset in ISO 8601 string) |
+| `set-timezone` | `<+HH:MM\|-HH:MM\|UTC\|LST> [label]` | Set display timezone or switch to sidereal mode |
+| `set-longitude` | `<degrees>` | Set observer longitude °East for LST computation |
 | `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
 | `set-altaz` | `<alt> <az>` | Set Alt/Az display values |
 | `show-msg` | `<seconds\|inf> [FONT:<n>] [BEEP] <text>` | Display a timed or persistent message; optional font code and/or beep |
@@ -796,7 +835,7 @@ options:
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
 | `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
-| `persist` | | Save current timezone, calibration, and sidereal state to NVM |
+| `persist` | | Save timezone label, UTC offset, longitude, and calibration to NVM |
 | `persist-read` | | Show stored NVM values (validity flag and all keys) |
 | `persist-clear` | | Invalidate stored NVM settings with a single flash write |
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
@@ -816,13 +855,14 @@ uv run tools/m5ctl set-time-now --timezone CEST
 uv run tools/m5ctl set-time "2026-05-14T12:30:00Z"
 uv run tools/m5ctl set-time "2026-05-14T12:30:00+01:00"
 uv run tools/m5ctl set-time "2026-05-14T12:30:00" CET
-uv run tools/m5ctl set-sidereal-now --longitude -3.7
-uv run tools/m5ctl set-sidereal-now --longitude -3.7 --dut1 0.2 --label LST
+uv run tools/m5ctl set-timezone +09:00 JST
+uv run tools/m5ctl set-timezone LST
+uv run tools/m5ctl set-longitude 135.5
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
 uv run tools/m5ctl beep
 uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
-uv run tools/m5ctl persist                # save tz + calibration + sidereal to NVM
+uv run tools/m5ctl persist                # save tz, offset, longitude, calibration to NVM
 uv run tools/m5ctl persist-read           # inspect NVM contents
 uv run tools/m5ctl persist-clear          # invalidate NVM (1 flash write)
 uv run tools/m5ctl persist-restore        # re-enable and apply stored NVM values
@@ -862,19 +902,7 @@ uv run tools/m5ctl set-time-now --offset 0         # no latency compensation
 
 Timezone resolution: IANA names (e.g. `Europe/Madrid`, `America/New_York`) are resolved via `zoneinfo`. Common abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their canonical IANA zone for time computation; the label shown on the device screen is always the string you passed.
 
-### `set-sidereal-now` — set device to current Local Sidereal Time
-
-```bash
-uv run tools/m5ctl set-sidereal-now --longitude -3.7              # Madrid (UTC+1/+2)
-uv run tools/m5ctl set-sidereal-now --longitude 0.0               # Greenwich
-uv run tools/m5ctl set-sidereal-now --longitude -3.7 --dut1 0.2  # with DUT1 correction
-uv run tools/m5ctl set-sidereal-now --longitude -3.7 --label LST  # custom label
-```
-
-`--longitude` (required) is degrees east; negative for west. `--dut1` is DUT1 = UT1 − UTC in seconds (from the [IERS bulletin](https://www.iers.org/), typically < 0.9 s; default `0`). `--label` sets the string shown on the device screen (default `LST`). `--offset N` (default `3`) adds BLE latency compensation as with `set-time-now`.
-
-LST is computed using the IAU 1982 GMST formula. The device ticks at the sidereal rate (≈ 1.00274× solar). To return to solar time, send any `set-time` or `set-time-now` command.
-
+`set-time-now` sends the current local time with the UTC offset embedded in the ISO 8601 string (e.g. `SET_TIME 2026-05-21T20:05:16+09:00`). The device subtracts the offset to store true UTC, then uses the offset to display local time on screen.
 
 ### tests/3d_model.py — real-time 3D orientation viewer
 
@@ -930,9 +958,9 @@ uv run pytest tests/test_persistence.py
 uv run pytest tests/test_persistence.py --device AA:BB:CC:DD:EE:FF
 ```
 
-The reason it is excluded is flash wear: every `PERSIST` or `PERSIST CLEAR` command writes to the ESP32 NVS flash. Running these tests on every CI or development `pytest` invocation would accumulate unnecessary write cycles. The exclusion is implemented via `addopts = "--ignore=tests/test_persistence.py"` in `pyproject.toml`; pytest's own rules ensure that an explicitly-supplied path on the command line overrides `--ignore`, so `pytest tests/test_persistence.py` still collects and runs all 12 tests.
+The reason it is excluded is flash wear: every `PERSIST` or `PERSIST CLEAR` command writes to the ESP32 NVS flash. Running these tests on every CI or development `pytest` invocation would accumulate unnecessary write cycles. The exclusion is implemented via `addopts = "--ignore=tests/test_persistence.py"` in `pyproject.toml`; pytest's own rules ensure that an explicitly-supplied path on the command line overrides `--ignore`, so `pytest tests/test_persistence.py` still collects and runs all 14 tests.
 
-Each test in the file is preceded by an autouse fixture that sends `PERSIST CLEAR` over BLE, giving every test a known starting state (`valid=0` in NVM) regardless of what prior tests left behind. The two reboot tests (`test_persist_survives_reboot` and `test_clear_survives_reboot`) send the `REBOOT` command, wait 5 seconds for the device to restart and re-advertise, then reconnect and verify the NVM state that the boot loader applied.
+Each test in the file is preceded by an autouse fixture that sends `PERSIST CLEAR` followed by `SET_LONGITUDE NONE` over BLE, giving every test a known starting state (`valid=0` in NVM and no longitude in RAM) regardless of what prior tests left behind. The two reboot tests (`test_persist_survives_reboot` and `test_clear_survives_reboot`) send the `REBOOT` command, wait 5 seconds for the device to restart and re-advertise, then reconnect and verify the NVM state that the boot loader applied.
 
 Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
@@ -979,7 +1007,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering; sprites are allocated at **8-bit (palette) colour depth** so the full-screen buffer fits in internal SRAM on all supported display sizes — a 320×240 sprite at 16-bit would require ~150 KB, which cannot be allocated alongside the BLE stack on the ESP32; at 8-bit it drops to ~75 KB. All standard colours (black, white, red, green, yellow, grey variants) map exactly or near-exactly to the 216-entry web-safe palette used in this mode. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
 - Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library, namespace `"clino"`. The `huge_app.csv` partition table reserves 20 KB for NVS — the settings payload is under 50 bytes. NVS writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
-- All timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, the 200 ms drain wait before `ESP.restart()` on `REBOOT`, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable in both cases since the device is about to reset or power off).
+- The clock subsystem uses `esp_timer_get_time()` (int64_t µs, no 49-day wrap) to track elapsed time since the last UTC sync and to advance the Q40 fixed-point sidereal phase. All other timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, the 200 ms drain wait before `ESP.restart()` on `REBOOT`, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable in both cases since the device is about to reset or power off).
 - Flash usage: ~55% of 3 MB. RAM usage: ~13% of 320 KB.
 
 ---

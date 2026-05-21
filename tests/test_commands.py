@@ -217,68 +217,146 @@ async def test_get_time_utc_has_z_suffix(device_addr):
 
 @pytest.mark.asyncio
 async def test_get_time_named_tz_label(device_addr):
-    """GET_TIME after a named-tz set returns the label in place of Z."""
+    """GET_TIME always returns UTC with Z suffix; the named label is for display only."""
     async with BleSession(device_addr) as s:
         await s.send("SET_TIME 2026-05-14T12:30:00 JST")
         resp = await s.send("GET_TIME")
-    assert resp.startswith("TIME 2026-05-14T12:30:"), resp
-    assert resp.endswith(" JST"), resp
+    assert re.fullmatch(r"TIME 2026-05-14T12:30:\d{2}Z", resp), resp
 
 
 @pytest.mark.asyncio
 async def test_get_time_numeric_offset_label(device_addr):
-    """GET_TIME after a numeric-offset set returns the offset in place of Z."""
+    """GET_TIME returns UTC (offset subtracted); +01:00 local 12:30 → UTC 11:30."""
     async with BleSession(device_addr) as s:
         await s.send("SET_TIME 2026-05-14T12:30:00+01:00")
         resp = await s.send("GET_TIME")
-    assert resp.startswith("TIME 2026-05-14T12:30:"), resp
-    assert resp.endswith(" +01:00"), resp
+    assert re.fullmatch(r"TIME 2026-05-14T11:30:\d{2}Z", resp), resp
 
 
 # ---------------------------------------------------------------------------
-# SET_SIDEREAL_TIME
+# SET_TIME_ZONE
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_set_sidereal_time_valid(device_addr):
+async def test_set_time_zone_numeric_offset(device_addr):
+    """SET_TIME_ZONE +09:00 is accepted."""
     async with BleSession(device_addr) as s:
-        resp = await s.send("SET_SIDEREAL_TIME 14:32:00")
-    assert resp == "OK SIDEREAL"
+        resp = await s.send("SET_TIME_ZONE +09:00")
+    assert resp == "OK TIMEZONE"
 
 
 @pytest.mark.asyncio
-async def test_set_sidereal_time_bad_format(device_addr):
+async def test_set_time_zone_negative_offset(device_addr):
+    """SET_TIME_ZONE -05:00 is accepted."""
     async with BleSession(device_addr) as s:
-        resp = await s.send("SET_SIDEREAL_TIME not-a-time")
-    assert resp == "ERR BAD_TIME"
+        resp = await s.send("SET_TIME_ZONE -05:00")
+    assert resp == "OK TIMEZONE"
 
 
 @pytest.mark.asyncio
-async def test_get_time_sidereal_format(device_addr):
-    """GET_TIME in sidereal mode returns HH:MM:SS LST, not ISO-8601."""
+async def test_set_time_zone_utc(device_addr):
+    """SET_TIME_ZONE UTC is accepted."""
     async with BleSession(device_addr) as s:
-        await s.send("SET_SIDEREAL_TIME 14:32:00")
-        resp = await s.send("GET_TIME")
-    assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} LST", resp), resp
+        resp = await s.send("SET_TIME_ZONE UTC")
+    assert resp == "OK TIMEZONE"
 
 
 @pytest.mark.asyncio
-async def test_get_time_sidereal_custom_label(device_addr):
-    """GET_TIME in sidereal mode uses a custom label when provided."""
+async def test_set_time_zone_lst(device_addr):
+    """SET_TIME_ZONE LST is accepted and switches to sidereal mode."""
     async with BleSession(device_addr) as s:
-        await s.send("SET_SIDEREAL_TIME 20:00:00 GST")
+        resp = await s.send("SET_TIME_ZONE LST")
+    assert resp == "OK TIMEZONE"
+
+
+@pytest.mark.asyncio
+async def test_set_time_zone_with_label(device_addr):
+    """SET_TIME_ZONE +09:00 JST uses JST as the display label."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME_ZONE +09:00 JST")
+    assert resp == "OK TIMEZONE"
+
+
+@pytest.mark.asyncio
+async def test_set_time_zone_bad_format(device_addr):
+    """SET_TIME_ZONE with an unrecognised spec is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME_ZONE garbage")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_get_time_gst_mode(device_addr):
+    """SET_TIME_ZONE LST without a longitude reports HH:MM:SS GST."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_TIME 2026-05-18T12:00:00Z")
+        await s.send("SET_TIME_ZONE LST")
         resp = await s.send("GET_TIME")
     assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} GST", resp), resp
 
 
 @pytest.mark.asyncio
-async def test_get_time_sidereal_midnight(device_addr):
-    """Sidereal midnight (00:00:00) returns TIME 00:00:00 LST, not TIME NONE."""
+async def test_get_time_lst_mode(device_addr):
+    """SET_TIME_ZONE LST with a longitude reports HH:MM:SS LST."""
     async with BleSession(device_addr) as s:
-        await s.send("SET_SIDEREAL_TIME 00:00:00")
+        await s.send("SET_TIME 2026-05-18T12:00:00Z")
+        await s.send("SET_LONGITUDE 135.0")
+        await s.send("SET_TIME_ZONE LST")
         resp = await s.send("GET_TIME")
-    assert resp != "TIME NONE", "midnight sidereal must not be reported as NONE"
     assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} LST", resp), resp
+
+
+# ---------------------------------------------------------------------------
+# SET_LONGITUDE
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_longitude_positive(device_addr):
+    """SET_LONGITUDE with a positive value is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_LONGITUDE 135.5")
+    assert resp == "OK LONGITUDE"
+
+
+@pytest.mark.asyncio
+async def test_set_longitude_negative(device_addr):
+    """SET_LONGITUDE with a negative value is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_LONGITUDE -3.7")
+    assert resp == "OK LONGITUDE"
+
+
+@pytest.mark.asyncio
+async def test_set_longitude_zero(device_addr):
+    """SET_LONGITUDE 0.0 (Greenwich meridian) is accepted."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_LONGITUDE 0.0")
+    assert resp == "OK LONGITUDE"
+
+
+@pytest.mark.asyncio
+async def test_set_longitude_out_of_range(device_addr):
+    """SET_LONGITUDE outside ±180° is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_LONGITUDE 200.0")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_longitude_none(device_addr):
+    """SET_LONGITUDE NONE clears the stored longitude."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_LONGITUDE 135.5")
+        resp = await s.send("SET_LONGITUDE NONE")
+    assert resp == "OK LONGITUDE"
+
+
+@pytest.mark.asyncio
+async def test_set_longitude_bad_format(device_addr):
+    """SET_LONGITUDE with a non-numeric argument is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_LONGITUDE notanumber")
+    assert resp == "ERR BAD_ARGS"
 
 
 # ---------------------------------------------------------------------------

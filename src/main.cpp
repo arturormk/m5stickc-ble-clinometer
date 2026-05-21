@@ -56,6 +56,8 @@ void setup() {
     Serial.begin(115200);
 
     memset(&g_state, 0, sizeof(g_state));
+    g_state.longitudeDeg      = NAN;  // 0.0f is a valid longitude; NaN means not configured
+    g_state.pendingBleHelpLine = -1;  // 0 would trigger immediate HELP output
     g_state.screenIndex     = SCREEN_CLINOMETER;
     g_state.prevScreenIndex = SCREEN_CLINOMETER;
     g_state.batteryLevel    = -1;

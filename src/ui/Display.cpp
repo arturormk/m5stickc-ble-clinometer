@@ -151,10 +151,10 @@ void Display::_drawClinometer(const DeviceState& state) {
 }
 
 void Display::_drawTime(const DeviceState& state) {
-    bool n = state.nightMode;
-    int cx = _W / 2;
-    time_t t = deviceCurrentTime(state);
-    if (t == 0) {
+    bool n  = state.nightMode;
+    int  cx = _W / 2;
+
+    if (state.utcAnchorSec == 0) {
         _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_DARKGREY, n));
         _sprite->setTextDatum(textdatum_t::middle_center);
@@ -163,10 +163,7 @@ void Display::_drawTime(const DeviceState& state) {
         return;
     }
 
-    struct tm ti;
-    gmtime_r(&t, &ti);
-
-    // Timezone label top-left (prominent, above clock)
+    // Timezone label top-left
     if (state.timezoneLabel[0] != '\0') {
         _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_CYAN, n));
@@ -174,23 +171,38 @@ void Display::_drawTime(const DeviceState& state) {
         _sprite->drawString(state.timezoneLabel, 10, 5);
     }
 
-    // Time: HH:MM:SS large centered
     char timeBuf[12];
-    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d",
-             ti.tm_hour, ti.tm_min, ti.tm_sec);
+    if (state.siderealMode) {
+        uint32_t lst = currentLstSeconds(state);
+        snprintf(timeBuf, sizeof(timeBuf), "%02u:%02u:%02u",
+                 lst / 3600, (lst % 3600) / 60, lst % 60);
+    } else {
+        // Local time = UTC + offset
+        time_t localT = deviceCurrentTime(state) + (time_t)state.timezoneOffsetSec;
+        struct tm ti;
+        gmtime_r(&localT, &ti);
+        snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d",
+                 ti.tm_hour, ti.tm_min, ti.tm_sec);
+
+        char dateBuf[12];
+        snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+        _sprite->setFont(&fonts::Font7);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->setTextDatum(textdatum_t::middle_center);
+        _sprite->drawString(timeBuf, cx, _H * 62 / 135);
+        _sprite->setFont(&fonts::Font4);
+        _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
+        _sprite->drawString(dateBuf, cx, _H * 105 / 135);
+        _sprite->setTextDatum(textdatum_t::top_left);
+        return;
+    }
+
+    // Sidereal: time only, no date
     _sprite->setFont(&fonts::Font7);
     _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setTextDatum(textdatum_t::middle_center);
     _sprite->drawString(timeBuf, cx, _H * 62 / 135);
-
-    if (!state.siderealMode) {
-        char dateBuf[12];
-        snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
-                 ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
-        _sprite->setFont(&fonts::Font4);
-        _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
-        _sprite->drawString(dateBuf, cx, _H * 105 / 135);
-    }
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 

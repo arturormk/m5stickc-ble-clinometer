@@ -41,8 +41,7 @@ async def _read(s: BleSession) -> dict[str, str]:
 
 
 _CAL_RE = re.compile(r"^[+-]\d+\.\d+,[+-]\d+\.\d+,[+-]\d+\.\d+$")
-_LST_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
-_RTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_LON_RE = re.compile(r"^-?\d+\.\d+$")
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +52,8 @@ _RTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 async def _clean_nvm(device_addr):
     async with BleSession(device_addr) as s:
         await _clear(s)
+        # Reset in-RAM longitude so tests that set a longitude don't bleed state
+        await s.send("SET_LONGITUDE NONE")
     yield
 
 
@@ -68,11 +69,13 @@ async def test_persist_read_format(device_addr):
     assert "valid" in fields
     assert fields["valid"] in ("0", "1")
     assert "tz" in fields
+    assert "tz_offset" in fields
+    # tz_offset is an integer (possibly negative)
+    int(fields["tz_offset"])
+    assert "lon" in fields
+    # lon is either a float string or "(none)"
+    assert fields["lon"] == "(none)" or _LON_RE.match(fields["lon"])
     assert "cal" in fields
-    assert "sid" in fields
-    assert fields["sid"] in ("on", "off")
-    assert "lst" in fields
-    assert "rtc" in fields
 
 
 @pytest.mark.asyncio
@@ -110,6 +113,7 @@ async def test_persist_saves_timezone(device_addr):
         fields = await _read(s)
     assert fields["valid"] == "1"
     assert fields["tz"] == "UTC"
+    assert fields["tz_offset"] == "0"
 
 
 @pytest.mark.asyncio
@@ -131,32 +135,58 @@ async def test_persist_saves_calibration(device_addr):
 
 
 @pytest.mark.asyncio
-async def test_persist_sidereal_mode(device_addr):
-    """PERSIST in sidereal mode stores sid=on with a valid lst and rtc anchor."""
+async def test_persist_sidereal_mode_via_timezone(device_addr):
+    """PERSIST in sidereal mode stores tz=LST and a longitude value."""
     async with BleSession(device_addr) as s:
-        # Need a valid RTC epoch for the anchor
-        await s.send("SET_TIME 2025-05-18T12:00:00Z UTC")
-        await s.send("SET_SIDEREAL_TIME 05:30:00 LST")
+        await s.send("SET_TIME 2025-05-18T12:00:00Z")
+        await s.send("SET_LONGITUDE 135.0")
+        await s.send("SET_TIME_ZONE LST")
         resp = await s.send("PERSIST")
-        assert "sid=on" in resp
+        assert resp.startswith("OK PERSISTED"), f"unexpected: {resp!r}"
+        assert "tz=LST" in resp
         fields = await _read(s)
     assert fields["valid"] == "1"
-    assert fields["sid"] == "on"
-    assert _LST_RE.match(fields["lst"]), f"unexpected lst format: {fields['lst']!r}"
-    assert _RTC_RE.match(fields["rtc"]), f"unexpected rtc format: {fields['rtc']!r}"
+    assert fields["tz"] == "LST"
+    assert fields["lon"] != "(none)"
+    assert _LON_RE.match(fields["lon"]), f"unexpected lon format: {fields['lon']!r}"
 
 
 @pytest.mark.asyncio
-async def test_persist_solar_mode_stores_sid_off(device_addr):
-    """PERSIST in solar mode stores sid=off and no lst/rtc anchor."""
+async def test_persist_solar_mode(device_addr):
+    """PERSIST in solar mode stores tz_offset and lon=(none) when no longitude is set."""
     async with BleSession(device_addr) as s:
-        await s.send("SET_TIME 2025-05-18T12:00:00Z UTC")
+        await s.send("SET_TIME 2025-05-18T12:00:00Z")
         resp = await s.send("PERSIST")
-        assert "sid=off" in resp
+        assert resp.startswith("OK PERSISTED"), f"unexpected: {resp!r}"
         fields = await _read(s)
-    assert fields["sid"] == "off"
-    assert fields["lst"] == "(none)"
-    assert fields["rtc"] == "(none)"
+    assert fields["tz"] == "UTC"
+    assert fields["tz_offset"] == "0"
+    assert fields["lon"] == "(none)"
+
+
+@pytest.mark.asyncio
+async def test_persist_saves_timezone_offset(device_addr):
+    """PERSIST records the numeric UTC offset when SET_TIME carried a +HH:MM suffix."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_TIME 2025-05-18T21:00:00+09:00")
+        resp = await s.send("PERSIST")
+        assert resp.startswith("OK PERSISTED"), f"unexpected: {resp!r}"
+        fields = await _read(s)
+    assert fields["valid"] == "1"
+    assert fields["tz_offset"] == "32400"
+
+
+@pytest.mark.asyncio
+async def test_persist_saves_longitude(device_addr):
+    """PERSIST records the longitude when SET_LONGITUDE was used."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_LONGITUDE -3.7")
+        resp = await s.send("PERSIST")
+        assert resp.startswith("OK PERSISTED"), f"unexpected: {resp!r}"
+        fields = await _read(s)
+    assert fields["valid"] == "1"
+    assert _LON_RE.match(fields["lon"]), f"unexpected lon format: {fields['lon']!r}"
+    assert abs(float(fields["lon"]) - (-3.7)) < 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +251,7 @@ async def test_persist_survives_reboot(device_addr):
         cal_resp = await s.send("CALIBRATE")
         _, gx, gy, gz = cal_resp.split()
         await s.send("PERSIST")
-        await s.send("REBOOT", timeout=5.0)
+        await s.send_no_wait("REBOOT")  # connection drops; don't wait for notification
 
     await asyncio.sleep(5.0)
 
@@ -244,7 +274,7 @@ async def test_clear_survives_reboot(device_addr):
         await s.send("SET_TIME 2025-05-18T12:00:00Z UTC")
         await s.send("PERSIST")
         await _clear(s)
-        await s.send("REBOOT", timeout=5.0)
+        await s.send_no_wait("REBOOT")  # connection drops; don't wait for notification
 
     await asyncio.sleep(5.0)
 

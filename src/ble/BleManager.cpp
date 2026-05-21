@@ -31,18 +31,27 @@ static const char* screenName(int idx) {
     }
 }
 
-static bool parseIso8601(const char* s, time_t* out, char* tzOut, size_t tzOutSize) {
+// Parse ISO8601 string into UTC epoch. Subtracts any +HH:MM/-HH:MM offset.
+// outOffsetSec receives the parsed UTC offset (0 for Z or bare), may be nullptr.
+// tzOut receives the suffix string (e.g. "+09:00", "UTC", ""), may be nullptr.
+static bool parseIso8601(const char* s, time_t* outUtc, int32_t* outOffsetSec,
+                         char* tzOut, size_t tzOutSize) {
     int y, mo, d, h, mi, sec, n = 0;
     if (sscanf(s, "%d-%d-%dT%d:%d:%d%n", &y, &mo, &d, &h, &mi, &sec, &n) < 6 || n == 0)
         return false;
     if (tzOut) tzOut[0] = '\0';
+    if (outOffsetSec) *outOffsetSec = 0;
     const char* suffix = s + n;
     if (*suffix == 'Z' || *suffix == 'z') {
         if (tzOut) snprintf(tzOut, tzOutSize, "UTC");
     } else if (*suffix == '\0') {
-        // bare datetime, no suffix — leave label empty
+        // bare datetime, no suffix — treat as UTC, leave label empty
     } else if (*suffix == '+' || *suffix == '-') {
         if (tzOut) snprintf(tzOut, tzOutSize, "%s", suffix);
+        int sign = (*suffix == '+') ? 1 : -1, hh = 0, mm = 0;
+        sscanf(suffix + 1, "%d:%d", &hh, &mm);
+        int32_t off = sign * (hh * 3600 + mm * 60);
+        if (outOffsetSec) *outOffsetSec = off;
     } else {
         return false;
     }
@@ -54,18 +63,11 @@ static bool parseIso8601(const char* s, time_t* out, char* tzOut, size_t tzOutSi
     t.tm_min   = mi;
     t.tm_sec   = sec;
     t.tm_isdst = 0;
-    time_t result = mktime(&t);
+    time_t result = mktime(&t);   // TZ=UTC0 set in begin() makes this behave as timegm
     if (result == (time_t)-1) return false;
-    *out = result;
-    return true;
-}
-
-// Parses "HH:MM:SS" → seconds since midnight stored in *out.
-static bool parseSiderealHMS(const char* s, time_t* out) {
-    int h, m, sec;
-    if (sscanf(s, "%d:%d:%d", &h, &m, &sec) != 3) return false;
-    if (h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59) return false;
-    *out = (time_t)(h * 3600 + m * 60 + sec);
+    // Subtract offset to get true UTC
+    if (outOffsetSec) result -= (time_t)(*outOffsetSec);
+    *outUtc = result;
     return true;
 }
 
@@ -222,8 +224,9 @@ static const char* const kHelpLines[] = {
     "GET_RADEC",
     "GET_ALTAZ",
     "GET_MSG",
-    "SET_TIME <ISO8601> [<tz>]",
-    "SET_SIDEREAL_TIME <HH:MM:SS> [<label>]",
+    "SET_TIME <ISO8601+offset> [<label>]",
+    "SET_TIME_ZONE <+HH:MM|-HH:MM|UTC|LST> [label]",
+    "SET_LONGITUDE <degrees|NONE>",
     "SET_RADEC <ra> <dec>",
     "SET_ALTAZ <alt> <az>",
     "SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
@@ -302,25 +305,19 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             buildStatusLine(*s_state, resp, sizeof(resp));
 
         } else if (strcasecmp(tok, "GET_TIME") == 0) {
-            time_t t = deviceCurrentTime(*s_state);
-            if (t == 0 && !s_state->siderealMode) {
+            if (s_state->utcAnchorSec == 0) {
                 strncpy(resp, "TIME NONE", sizeof(resp) - 1);
             } else if (s_state->siderealMode) {
-                int h  = (int)(t / 3600) % 24;
-                int m  = (int)(t % 3600) / 60;
-                int sc = (int)(t % 60);
-                const char* tz = s_state->timezoneLabel[0] ? s_state->timezoneLabel : "LST";
-                snprintf(resp, sizeof(resp), "TIME %02d:%02d:%02d %s", h, m, sc, tz);
+                uint32_t lst = currentLstSeconds(*s_state);
+                int h  = (int)(lst / 3600);
+                int m  = (int)((lst % 3600) / 60);
+                int sc = (int)(lst % 60);
+                const char* label = isnan(s_state->longitudeDeg) ? "GST" : s_state->timezoneLabel;
+                snprintf(resp, sizeof(resp), "TIME %02d:%02d:%02d %s", h, m, sc, label);
             } else {
                 char iso[24];
-                formatIso8601(t, iso, sizeof(iso));
-                const char* tz = s_state->timezoneLabel;
-                if (tz[0] && strcmp(tz, "UTC") != 0) {
-                    iso[strlen(iso) - 1] = '\0';  // strip trailing 'Z'
-                    snprintf(resp, sizeof(resp), "TIME %s %s", iso, tz);
-                } else {
-                    snprintf(resp, sizeof(resp), "TIME %s", iso);
-                }
+                formatIso8601(deviceCurrentTime(*s_state), iso, sizeof(iso));
+                snprintf(resp, sizeof(resp), "TIME %s", iso);  // always UTC with Z
             }
 
         } else if (strcasecmp(tok, "GET_RADEC") == 0) {
@@ -371,44 +368,83 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "SET_TIME") == 0) {
             char* iso = strtok_r(nullptr, " ", &saveptr);
             if (!iso) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            time_t t;
+            time_t utcEpoch;
+            int32_t offsetSec = 0;
             char tzBuf[16] = {};
-            if (!parseIso8601(iso, &t, tzBuf, sizeof(tzBuf))) {
+            if (!parseIso8601(iso, &utcEpoch, &offsetSec, tzBuf, sizeof(tzBuf))) {
                 strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
             } else {
-                if (tzBuf[0] == '\0') {
-                    char* tzTok = strtok_r(nullptr, " ", &saveptr);
-                    if (tzTok) snprintf(tzBuf, sizeof(tzBuf), "%s", tzTok);
-                }
-                s_state->timeEpochSec    = t;
-                s_state->timeSetAtMillis = millis();
-                s_state->siderealMode    = false;
-                strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
-                s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+                // Optional label token overrides the auto-derived label
+                char* labelTok = strtok_r(nullptr, " ", &saveptr);
+                if (labelTok && labelTok[0])
+                    snprintf(tzBuf, sizeof(tzBuf), "%s", labelTok);
+                // Write true UTC to RTC
                 if (M5.Rtc.isEnabled()) {
-                    struct tm utc;
-                    gmtime_r(&t, &utc);
-                    M5.Rtc.setDateTime(&utc);
+                    struct tm utcTm;
+                    gmtime_r(&utcEpoch, &utcTm);
+                    M5.Rtc.setDateTime(&utcTm);
                 }
+                s_state->siderealMode    = false;
+                // Update timezone only when the ISO8601 carried an explicit offset
+                if (offsetSec != 0 || tzBuf[0] != '\0') {
+                    s_state->timezoneOffsetSec = offsetSec;
+                    strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
+                    s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+                }
+                Nvm::rebuildAnchor(*s_state);
                 strncpy(resp, "OK TIME", sizeof(resp) - 1);
             }
 
-        } else if (strcasecmp(tok, "SET_SIDEREAL_TIME") == 0) {
-            char* hms = strtok_r(nullptr, " ", &saveptr);
-            if (!hms) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            time_t t;
-            if (!parseSiderealHMS(hms, &t)) {
-                strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
-            } else {
-                char* labelTok = strtok_r(nullptr, " ", &saveptr);
-                s_state->timeEpochSec    = t;
-                s_state->timeSetAtMillis = millis();
-                s_state->siderealMode    = true;
-                const char* label = (labelTok && labelTok[0]) ? labelTok : "LST";
-                strncpy(s_state->timezoneLabel, label, sizeof(s_state->timezoneLabel) - 1);
+        } else if (strcasecmp(tok, "SET_TIME_ZONE") == 0) {
+            char* spec = strtok_r(nullptr, " ", &saveptr);
+            if (!spec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            char* labelOverride = strtok_r(nullptr, " ", &saveptr);
+            if (strcasecmp(spec, "UTC") == 0) {
+                s_state->siderealMode      = false;
+                s_state->timezoneOffsetSec = 0;
+                strncpy(s_state->timezoneLabel, "UTC", sizeof(s_state->timezoneLabel) - 1);
+            } else if (strcasecmp(spec, "LST") == 0 || strcasecmp(spec, "GST") == 0) {
+                s_state->siderealMode = true;
+                const char* defaultLabel = isnan(s_state->longitudeDeg) ? "GST" : "LST";
+                strncpy(s_state->timezoneLabel, defaultLabel, sizeof(s_state->timezoneLabel) - 1);
+            } else if (spec[0] == '+' || spec[0] == '-') {
+                int sign = (spec[0] == '+') ? 1 : -1, hh = 0, mm = 0;
+                sscanf(spec + 1, "%d:%d", &hh, &mm);
+                s_state->siderealMode      = false;
+                s_state->timezoneOffsetSec = sign * (hh * 3600 + mm * 60);
+                strncpy(s_state->timezoneLabel, spec, sizeof(s_state->timezoneLabel) - 1);
                 s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
-                strncpy(resp, "OK SIDEREAL", sizeof(resp) - 1);
+            } else {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                goto respond;
             }
+            if (labelOverride && labelOverride[0]) {
+                strncpy(s_state->timezoneLabel, labelOverride, sizeof(s_state->timezoneLabel) - 1);
+                s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+            }
+            Nvm::rebuildAnchor(*s_state);
+            strncpy(resp, "OK TIMEZONE", sizeof(resp) - 1);
+
+        } else if (strcasecmp(tok, "SET_LONGITUDE") == 0) {
+            char* degStr = strtok_r(nullptr, " ", &saveptr);
+            if (!degStr) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            float deg;
+            if (strcasecmp(degStr, "NONE") == 0) {
+                deg = NAN;
+            } else {
+                char* end = degStr;
+                deg = strtof(degStr, &end);
+                if (end == degStr || deg < -180.0f || deg > 180.0f) {
+                    strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                    goto respond;
+                }
+            }
+            s_state->longitudeDeg = deg;
+            if (s_state->siderealMode)
+                strncpy(s_state->timezoneLabel, isnan(deg) ? "GST" : "LST",
+                        sizeof(s_state->timezoneLabel) - 1);
+            Nvm::rebuildAnchor(*s_state);
+            strncpy(resp, "OK LONGITUDE", sizeof(resp) - 1);
 
         } else if (strcasecmp(tok, "SET_RADEC") == 0) {
             char* ra  = strtok_r(nullptr, " ", &saveptr);
@@ -612,18 +648,22 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 if (s_imu) Nvm::restore(*s_state, *s_imu);
                 float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
                 if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
-                snprintf(resp, sizeof(resp), "OK RESTORED tz=%s cal=%.4f,%.4f,%.4f sid=%s",
+                char lonBuf[16];
+                if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
+                else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
+                snprintf(resp, sizeof(resp), "OK RESTORED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f",
                          s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         rgx, rgy, rgz,
-                         s_state->siderealMode ? "on" : "off");
+                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz);
             } else {
                 float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
                 if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
                 if (s_imu) Nvm::saveAll(*s_state, *s_imu);
-                snprintf(resp, sizeof(resp), "OK PERSISTED tz=%s cal=%.4f,%.4f,%.4f sid=%s",
+                char lonBuf[16];
+                if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
+                else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
+                snprintf(resp, sizeof(resp), "OK PERSISTED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f",
                          s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         rgx, rgy, rgz,
-                         s_state->siderealMode ? "on" : "off");
+                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz);
             }
 
         } else if (strcasecmp(tok, "REBOOT") == 0) {
@@ -631,7 +671,7 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             s_state->pendingReboot = true;
 
         } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
-            s_state->pendingBleHelpReady = true;
+            s_state->pendingBleHelpLine = 0;
             return;
 
         } else {
@@ -655,30 +695,9 @@ void BleManager::begin(DeviceState* state, ImuManager* imu) {
     s_state = state;
     s_imu   = imu;
 
-    // Ensure mktime interprets struct tm as UTC
+    // Ensure mktime interprets struct tm as UTC (makes mktime behave as timegm)
     setenv("TZ", "UTC0", 1);
     tzset();
-
-    // Restore time from RTC across power cycles (guard against never-set default ~2000-01-01)
-    if (M5.Rtc.isEnabled() && !M5.Rtc.getVoltLow()) {
-        m5::rtc_datetime_t dt;
-        if (M5.Rtc.getDateTime(&dt) && dt.date.year >= 2020) {
-            struct tm utc = {};
-            utc.tm_year  = dt.date.year - 1900;
-            utc.tm_mon   = dt.date.month - 1;
-            utc.tm_mday  = dt.date.date;
-            utc.tm_hour  = dt.time.hours;
-            utc.tm_min   = dt.time.minutes;
-            utc.tm_sec   = dt.time.seconds;
-            utc.tm_isdst = 0;
-            time_t t = mktime(&utc);
-            if (t > 0) {
-                s_state->timeEpochSec    = t;
-                s_state->timeSetAtMillis = millis();
-                s_state->siderealMode    = false;
-            }
-        }
-    }
 
     BLEDevice::setMTU(185);
     BLEDevice::init(BLE_DEVICE_NAME);
@@ -726,12 +745,15 @@ void BleManager::update(DeviceState& state) {
         state.pendingBleResponseReady = false;
     }
 
-    // Drain pending HELP response (one burst of notifications)
-    if (state.pendingBleHelpReady) {
-        for (int i = 0; i < kHelpLineCount; i++)
-            sendResponse(kHelpLines[i]);
-        sendResponse("OK");
-        state.pendingBleHelpReady = false;
+    // Send one HELP line per tick to avoid overflowing the BLE TX notification queue
+    if (state.pendingBleHelpLine >= 0) {
+        if (state.pendingBleHelpLine < kHelpLineCount) {
+            sendResponse(kHelpLines[state.pendingBleHelpLine]);
+            state.pendingBleHelpLine++;
+        } else {
+            sendResponse("OK");
+            state.pendingBleHelpLine = -1;
+        }
     }
 
     // Drain pending button event

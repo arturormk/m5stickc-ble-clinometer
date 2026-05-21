@@ -130,18 +130,14 @@ def do_send(args, command: str) -> None:
     run(go())
 
 
-def _compute_lst(utc_unix: float, longitude_deg: float, dut1: float = 0.0) -> int:
-    """Returns current Local Sidereal Time as integer seconds [0, 86400)."""
-    ut1 = utc_unix + dut1
-    jd  = ut1 / 86400.0 + 2440587.5
-    d   = jd - 2451545.0
-    T   = d / 36525.0
-    gmst_deg = (280.46061837
-                + 360.98564736629 * d
-                + 0.000387933 * T**2
-                - T**3 / 38710000.0) % 360.0
-    lst_deg  = (gmst_deg + longitude_deg) % 360.0
-    return int(lst_deg * 240.0) % 86400
+def _fmt_offset(utcoffset) -> str:
+    """Format a UTC offset timedelta as +HH:MM or Z."""
+    if utcoffset is None or int(utcoffset.total_seconds()) == 0:
+        return "Z"
+    s = int(utcoffset.total_seconds())
+    sign = "+" if s >= 0 else "-"
+    h, m = divmod(abs(s) // 60, 60)
+    return f"{sign}{h:02d}:{m:02d}"
 
 
 _TZ_ABBREVS: dict[str, str] = {
@@ -184,11 +180,14 @@ examples:
   m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
   m5ctl calibrate-reset                       # restore hardware reference
   m5ctl status
-  m5ctl set-time-now                    # local time (default)
-  m5ctl set-time-now --utc             # UTC
-  m5ctl set-time-now --timezone CEST   # named timezone
+  m5ctl set-time-now                    # sync from host clock (embeds UTC offset)
+  m5ctl set-time-now --utc             # force UTC
+  m5ctl set-time-now --timezone CEST   # use named timezone
   m5ctl set-time-now --timezone Europe/Madrid
   m5ctl set-time "2026-05-14T12:30:00+01:00"
+  m5ctl set-timezone +09:00 JST        # switch display to JST without re-syncing
+  m5ctl set-timezone LST               # switch to sidereal (needs set-longitude first)
+  m5ctl set-longitude 135.5            # set observer longitude (Osaka)
   m5ctl set-radec "12:34:56" "+07:08:09"
   m5ctl set-altaz "+43.2" "181.7"
   m5ctl show-msg 5 "Moving altitude axis"
@@ -200,7 +199,7 @@ examples:
   m5ctl night-mode off     # restore normal colors
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
-  m5ctl persist            # save current tz, calibration, sidereal state to NVS
+  m5ctl persist            # save current tz, longitude, calibration to NVS
   m5ctl persist-read       # show stored NVS values (valid flag + all keys)
   m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
   m5ctl persist-restore    # re-enable and apply last stored values in-session
@@ -263,24 +262,27 @@ examples:
                        help="Set device clock to the current host time")
     grp = p.add_mutually_exclusive_group()
     grp.add_argument("--utc",      action="store_true",
-                     help="Use UTC time (label: UTC)")
+                     help="Use UTC time")
     grp.add_argument("--local",    action="store_true",
                      help="Use host local time (default)")
     grp.add_argument("--timezone", metavar="TZ",
                      help="Use named timezone, e.g. Europe/Madrid or CEST")
+    p.add_argument("--label", default="", metavar="STR",
+                   help="Override display label on device (e.g. JST)")
     p.add_argument("--offset", type=int, default=3, metavar="N",
                    help="Seconds added for BLE latency compensation (default: 3)")
 
-    p = sub.add_parser("set-sidereal-now",
-                       help="Set device clock to current Local Sidereal Time")
-    p.add_argument("--longitude", type=float, required=True, metavar="DEG",
-                   help="Observer longitude in degrees east (negative = west)")
-    p.add_argument("--dut1",     type=float, default=0.0,  metavar="SEC",
-                   help="DUT1 = UT1 - UTC in seconds (from IERS bulletin, default 0)")
-    p.add_argument("--label",    default="LST", metavar="STR",
-                   help="Label shown on device screen (default: LST)")
-    p.add_argument("--offset",   type=int, default=3, metavar="N",
-                   help="Seconds added for BLE latency compensation (default: 3)")
+    p = sub.add_parser("set-timezone",
+                       help="Set display timezone/mode without changing the clock")
+    p.add_argument("spec",
+                   help="Offset (+HH:MM or -HH:MM), UTC, or LST/GST for sidereal")
+    p.add_argument("label", nargs="?", default="",
+                   help="Optional display label override (e.g. JST, CET)")
+
+    p = sub.add_parser("set-longitude",
+                       help="Set observer longitude for sidereal time computation")
+    p.add_argument("degrees", type=float,
+                   help="Longitude in degrees east (negative = west), range ±180")
 
     p = sub.add_parser("set-radec", help="Set RA/Dec display values")
     p.add_argument("ra",  help="e.g. 12:34:56")
@@ -306,7 +308,7 @@ examples:
     p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
     p.add_argument("state", choices=["on", "off"], help="on or off")
 
-    sub.add_parser("persist",         help="Save current tz, calibration and sidereal state to NVS")
+    sub.add_parser("persist",         help="Save current tz, timezone offset, longitude and calibration to NVS")
     sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
     sub.add_parser("persist-clear",   help="Invalidate stored values with a single NVS write")
     sub.add_parser("persist-restore", help="Re-enable and apply last stored NVS values in-session")
@@ -368,30 +370,29 @@ examples:
                 cmd += f" {args.tz}"
             do_send(args, cmd)
         case "set-time-now":
-            offset = timedelta(seconds=args.offset)
+            latency = timedelta(seconds=args.offset)
             if args.utc:
-                now = datetime.now(timezone.utc) + offset
-                label = "UTC"
+                now = datetime.now(timezone.utc) + latency
             elif args.timezone:
                 tz = _resolve_tz(args.timezone)
-                now = datetime.now(tz) + offset
-                label = args.timezone[:15]
+                now = datetime.now(tz) + latency
             else:
-                now = datetime.now().astimezone() + offset
-                label = now.strftime("%Z")
-            ts = now.strftime("%Y-%m-%dT%H:%M:%S")
+                now = datetime.now().astimezone() + latency
+            # Embed the UTC offset in the ISO8601 string so device subtracts it correctly.
+            # An optional label override follows the timestamp.
+            ts = now.strftime("%Y-%m-%dT%H:%M:%S") + _fmt_offset(now.utcoffset())
             cmd = f"SET_TIME {ts}"
-            if label:
-                cmd += f" {label}"
+            if args.label:
+                cmd += f" {args.label}"
             do_send(args, cmd)
-        case "set-sidereal-now":
-            utc_now = datetime.now(timezone.utc).timestamp() + args.offset
-            lst_sec = _compute_lst(utc_now, args.longitude, args.dut1)
-            h = lst_sec // 3600
-            m = (lst_sec % 3600) // 60
-            s = lst_sec % 60
-            ts = f"{h:02d}:{m:02d}:{s:02d}"
-            do_send(args, f"SET_SIDEREAL_TIME {ts} {args.label}")
+        case "set-timezone":
+            spec = args.spec
+            cmd = f"SET_TIME_ZONE {spec}"
+            if args.label:
+                cmd += f" {args.label}"
+            do_send(args, cmd)
+        case "set-longitude":
+            do_send(args, f"SET_LONGITUDE {args.degrees}")
         case "set-radec":
             do_send(args, f"SET_RADEC {args.ra} {args.dec}")
         case "set-altaz":

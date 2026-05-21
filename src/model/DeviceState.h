@@ -1,6 +1,17 @@
 #pragma once
 #include <Arduino.h>
 #include <time.h>
+#include <math.h>
+#include <esp_timer.h>
+
+// Sidereal / GMST constants (used in inline functions below)
+static constexpr uint64_t SIDEREAL_SCALE_Q40 = (1ULL << 40);
+// round(2^40 * 1.002737909350795 / 86400)
+static constexpr uint64_t SIDEREAL_INC_Q40   = 12760671ULL;
+// 2000-01-01 12:00:00 UTC as Unix epoch
+static constexpr uint64_t J2000_UNIX_SEC      = 946728000ULL;
+// GMST at J2000.0 in seconds of time
+static constexpr double   GMST_J2000_SEC      = 67310.54841;
 
 #define MELODY_MAX_NOTES 32
 
@@ -38,10 +49,13 @@ struct DeviceState {
     float    accMag;          // filtered gravity vector magnitude in g (~1.0 when stationary; data quality indicator)
     uint32_t tiltTimestampMs;
 
-    time_t   timeEpochSec;       // 0 = not set
-    uint32_t timeSetAtMillis;
-    char     timezoneLabel[16];  // e.g. "UTC", "+01:00", "CET"; empty = not set
-    bool     siderealMode;       // if true, tick at sidereal rate (366.2422/365.2422)
+    time_t   utcAnchorSec;       // UTC epoch at last sync (0 = not set)
+    int64_t  anchorUs;           // esp_timer_get_time() at last sync
+    uint64_t lstPhaseQ40;        // LST phase at anchor (Q40 fixed-point)
+    int32_t  timezoneOffsetSec;  // UTC+N offset in seconds for solar display
+    float    longitudeDeg;       // Observer longitude °East; NAN = not set
+    char     timezoneLabel[16];  // e.g. "UTC", "+09:00", "JST", "LST", "GST"
+    bool     siderealMode;       // true when displaying LST/GST
 
     char raText[32];
     char decText[32];
@@ -74,16 +88,22 @@ struct DeviceState {
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];
     volatile bool pendingBleEventReady;
-    volatile bool pendingBleHelpReady;
+    volatile int16_t pendingBleHelpLine;  // -1 = idle; 0..N = next line to send; N+1 = send "OK"
     volatile bool bleClientWantsNewline;
 };
 
+// Returns current UTC epoch, advancing from the anchor.
 inline time_t deviceCurrentTime(const DeviceState& s) {
-    if (s.timeEpochSec == 0) return 0;
-    uint32_t elapsedMs = millis() - s.timeSetAtMillis;
-    if (s.siderealMode) {
-        // Sidereal rate ≈ 1002738/1000000; use 64-bit to avoid overflow in product
-        elapsedMs = (uint32_t)((uint64_t)elapsedMs * 1002738ULL / 1000000ULL);
-    }
-    return s.timeEpochSec + (time_t)(elapsedMs / 1000UL);
+    if (s.utcAnchorSec == 0) return 0;
+    int64_t elapsedUs = esp_timer_get_time() - s.anchorUs;
+    return s.utcAnchorSec + (time_t)(elapsedUs / 1000000LL);
+}
+
+// Returns current LST/GST as seconds of day [0, 86400). Pure integer arithmetic.
+inline uint32_t currentLstSeconds(const DeviceState& s) {
+    if (s.utcAnchorSec == 0) return 0;
+    int64_t elapsedUs   = esp_timer_get_time() - s.anchorUs;
+    uint64_t elapsedSec = (uint64_t)(elapsedUs / 1000000LL);
+    uint64_t phase = (s.lstPhaseQ40 + elapsedSec * SIDEREAL_INC_Q40) & (SIDEREAL_SCALE_Q40 - 1ULL);
+    return (uint32_t)((phase * 86400ULL) >> 40);
 }
