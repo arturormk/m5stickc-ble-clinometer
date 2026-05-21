@@ -295,14 +295,27 @@ Returns a one-line summary of device state.
 
 ### `GET_TIME`
 
-Returns the current time as set by `SET_TIME`, ticking locally since then.
+Returns the current time as set by `SET_TIME` or `SET_SIDEREAL_TIME`, ticking locally since then.
+
+The response format depends on the active mode and the timezone label stored at set-time:
+
+| Mode | Example response |
+|---|---|
+| UTC (label `UTC` or none) | `TIME 2026-04-19T18:42:10Z` |
+| Local/named timezone | `TIME 2026-04-19T18:42:10 JST` |
+| Numeric offset | `TIME 2026-04-19T17:42:10 +01:00` |
+| Sidereal | `TIME 18:42:10 LST` |
 
 ```
 → GET_TIME
-← TIME 2026-04-19T18:42:10Z
+← TIME 2026-04-19T18:42:10Z       (UTC)
+← TIME 2026-04-19T18:42:10 JST    (local timezone label)
+← TIME 18:42:10 LST               (sidereal — no date)
 ```
 
-Returns `TIME NONE` if time has not been set since boot.
+In sidereal mode the date is omitted entirely, as sidereal time has no calendar date. The label shown is whatever was passed to `SET_SIDEREAL_TIME` (default `LST`).
+
+Returns `TIME NONE` if no time has been set since boot (solar mode only; sidereal midnight `00:00:00` is reported normally).
 
 ---
 

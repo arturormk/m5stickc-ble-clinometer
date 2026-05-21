@@ -303,12 +303,24 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
 
         } else if (strcasecmp(tok, "GET_TIME") == 0) {
             time_t t = deviceCurrentTime(*s_state);
-            if (t == 0) {
+            if (t == 0 && !s_state->siderealMode) {
                 strncpy(resp, "TIME NONE", sizeof(resp) - 1);
+            } else if (s_state->siderealMode) {
+                int h  = (int)(t / 3600) % 24;
+                int m  = (int)(t % 3600) / 60;
+                int sc = (int)(t % 60);
+                const char* tz = s_state->timezoneLabel[0] ? s_state->timezoneLabel : "LST";
+                snprintf(resp, sizeof(resp), "TIME %02d:%02d:%02d %s", h, m, sc, tz);
             } else {
                 char iso[24];
                 formatIso8601(t, iso, sizeof(iso));
-                snprintf(resp, sizeof(resp), "TIME %s", iso);
+                const char* tz = s_state->timezoneLabel;
+                if (tz[0] && strcmp(tz, "UTC") != 0) {
+                    iso[strlen(iso) - 1] = '\0';  // strip trailing 'Z'
+                    snprintf(resp, sizeof(resp), "TIME %s %s", iso, tz);
+                } else {
+                    snprintf(resp, sizeof(resp), "TIME %s", iso);
+                }
             }
 
         } else if (strcasecmp(tok, "GET_RADEC") == 0) {

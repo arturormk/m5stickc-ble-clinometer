@@ -107,15 +107,18 @@ async def test_get_status_fields(device_addr):
 
 @pytest.mark.asyncio
 async def test_get_time_format(device_addr):
-    """GET_TIME should return TIME <ISO-8601> or TIME NONE."""
+    """GET_TIME should return TIME NONE, ISO-8601 (Z or tz label), or HH:MM:SS <label>."""
     async with BleSession(device_addr) as s:
         resp = await s.send("GET_TIME")
     assert resp.startswith("TIME ")
     payload = resp[5:]
-    if payload != "NONE":
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", payload), (
-            f"Expected ISO-8601 timestamp, got: {payload!r}"
-        )
+    valid = (
+        payload == "NONE"
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", payload)
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2} \S+", payload)
+        or re.fullmatch(r"\d{2}:\d{2}:\d{2} \S+", payload)
+    )
+    assert valid, f"Unexpected GET_TIME payload: {payload!r}"
 
 
 @pytest.mark.asyncio
@@ -203,6 +206,35 @@ async def test_set_time_no_tz_suffix(device_addr):
     assert resp == "OK TIME"
 
 
+@pytest.mark.asyncio
+async def test_get_time_utc_has_z_suffix(device_addr):
+    """GET_TIME after a UTC set returns ISO-8601 with Z suffix."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_TIME 2026-06-20T08:30:00Z")
+        resp = await s.send("GET_TIME")
+    assert re.fullmatch(r"TIME \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", resp), resp
+
+
+@pytest.mark.asyncio
+async def test_get_time_named_tz_label(device_addr):
+    """GET_TIME after a named-tz set returns the label in place of Z."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_TIME 2026-05-14T12:30:00 JST")
+        resp = await s.send("GET_TIME")
+    assert resp.startswith("TIME 2026-05-14T12:30:"), resp
+    assert resp.endswith(" JST"), resp
+
+
+@pytest.mark.asyncio
+async def test_get_time_numeric_offset_label(device_addr):
+    """GET_TIME after a numeric-offset set returns the offset in place of Z."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_TIME 2026-05-14T12:30:00+01:00")
+        resp = await s.send("GET_TIME")
+    assert resp.startswith("TIME 2026-05-14T12:30:"), resp
+    assert resp.endswith(" +01:00"), resp
+
+
 # ---------------------------------------------------------------------------
 # SET_SIDEREAL_TIME
 # ---------------------------------------------------------------------------
@@ -219,6 +251,34 @@ async def test_set_sidereal_time_bad_format(device_addr):
     async with BleSession(device_addr) as s:
         resp = await s.send("SET_SIDEREAL_TIME not-a-time")
     assert resp == "ERR BAD_TIME"
+
+
+@pytest.mark.asyncio
+async def test_get_time_sidereal_format(device_addr):
+    """GET_TIME in sidereal mode returns HH:MM:SS LST, not ISO-8601."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_SIDEREAL_TIME 14:32:00")
+        resp = await s.send("GET_TIME")
+    assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} LST", resp), resp
+
+
+@pytest.mark.asyncio
+async def test_get_time_sidereal_custom_label(device_addr):
+    """GET_TIME in sidereal mode uses a custom label when provided."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_SIDEREAL_TIME 20:00:00 GST")
+        resp = await s.send("GET_TIME")
+    assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} GST", resp), resp
+
+
+@pytest.mark.asyncio
+async def test_get_time_sidereal_midnight(device_addr):
+    """Sidereal midnight (00:00:00) returns TIME 00:00:00 LST, not TIME NONE."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_SIDEREAL_TIME 00:00:00")
+        resp = await s.send("GET_TIME")
+    assert resp != "TIME NONE", "midnight sidereal must not be reported as NONE"
+    assert re.fullmatch(r"TIME \d{2}:\d{2}:\d{2} LST", resp), resp
 
 
 # ---------------------------------------------------------------------------
