@@ -823,7 +823,7 @@ options:
 | `get-altaz` | | Get stored Alt/Az values |
 | `get-msg` | | Get current message state |
 | `set-time` | `<iso8601> [<label>]` | Set device clock (offset subtracted to store UTC); optional label for display |
-| `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time (sends local UTC offset in ISO 8601 string) |
+| `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time; local time auto-appends the system TZ abbreviation as label |
 | `set-timezone` | `<+HH:MM\|-HH:MM\|UTC\|LST> [label]` | Set display timezone or switch to sidereal mode |
 | `set-longitude` | `<degrees>` | Set observer longitude °East for LST computation |
 | `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
@@ -892,7 +892,7 @@ Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pic
 
 ```bash
 uv run tools/m5ctl set-time-now                    # local time (label = system TZ abbreviation)
-uv run tools/m5ctl set-time-now --utc              # UTC time (label: UTC)
+uv run tools/m5ctl set-time-now --utc              # UTC time (no label)
 uv run tools/m5ctl set-time-now --timezone CEST    # time in CEST (UTC+2); label: CEST
 uv run tools/m5ctl set-time-now --timezone Europe/Madrid  # IANA timezone; label: Europe/Madrid
 uv run tools/m5ctl set-time-now --offset 0         # no latency compensation
@@ -902,7 +902,7 @@ uv run tools/m5ctl set-time-now --offset 0         # no latency compensation
 
 Timezone resolution: IANA names (e.g. `Europe/Madrid`, `America/New_York`) are resolved via `zoneinfo`. Common abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their canonical IANA zone for time computation; the label shown on the device screen is always the string you passed.
 
-`set-time-now` sends the current local time with the UTC offset embedded in the ISO 8601 string (e.g. `SET_TIME 2026-05-21T20:05:16+09:00`). The device subtracts the offset to store true UTC, then uses the offset to display local time on screen.
+`set-time-now` sends the current local time with the UTC offset embedded in the ISO 8601 string followed by the system timezone abbreviation as the display label (e.g. `SET_TIME 2026-05-21T20:05:16+02:00 CEST`). The device subtracts the offset to store true UTC, then uses the offset and label to display local time on screen. When `--utc` is used no label is sent; when `--timezone` is used the label is the string you passed.
 
 ### tests/3d_model.py — real-time 3D orientation viewer
 
