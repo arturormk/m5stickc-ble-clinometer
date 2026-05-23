@@ -391,6 +391,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                     strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
                     s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
                 }
+                s_state->utcAnchorSec = utcEpoch;
+                s_state->anchorUs     = esp_timer_get_time();
                 Nvm::rebuildAnchor(*s_state);
                 strncpy(resp, "OK TIME", sizeof(resp) - 1);
             }

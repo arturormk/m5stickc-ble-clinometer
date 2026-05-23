@@ -21,7 +21,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
 - **Plays a brief startup tone** on boot (single 3600 Hz beep) to confirm speaker initialisation; volume is tuned per board family (lower for louder models such as the M5Stack)
-- **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, and calibration reference vector can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot
+- **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, and calibration reference vector can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot. On devices without an onboard RTC (e.g. M5Stack Grey) the clock is not preserved across power cycles; `SET_TIME` must be re-sent after each reboot
 
 ## Hardware
 
@@ -42,6 +42,7 @@ This is a [PlatformIO](https://platformio.org/) project targeting the Arduino fr
 ./flash                  # build + flash to m5stickc-plus2 (default)
 ./flash m5stickc-plus2
 ./flash m5stack-core2
+./flash m5stack-grey
 ./flash m5stack-cores3
 ./flash -h               # show usage
 ```
@@ -54,6 +55,7 @@ Compilation is incremental — only changed files are recompiled. The script rep
 |---|---|---|
 | `m5stickc-plus2` | M5StickC Plus 2 | espressif32 @ 6.1.0 |
 | `m5stack-core2` | M5Stack Core2 | espressif32 @ 6.1.0 |
+| `m5stack-grey` | M5Stack Grey | espressif32 @ 6.1.0 |
 | `m5stack-cores3` | M5Stack CoreS3 | espressif32 @ 7.x |
 
 The source uses **M5Unified** (`m5stack/M5Unified`) rather than the device-specific `M5StickCPlus2` library. `M5.Imu.isEnabled()` and `M5.Speaker.isEnabled()` guards are used throughout so the firmware degrades gracefully on boards that lack an IMU or speaker — the clinometer screen shows `IMU N/A` and BEEP commands are silently skipped. The display layout adapts to the actual screen dimensions reported by `M5.Display` after `setRotation()`: all pixel coordinates, margins, bar sizes, and bubble radii are derived from `width()` and `height()` at start-up, so the same code renders correctly on the M5StickC Plus 2 (240×135) and on larger displays such as the Core2 or CoreS3 (320×240).
@@ -193,7 +195,7 @@ The first value is **pitch** (tilting the screen toward or away from you — rot
 | Device | Pitch formula | Roll formula | Pitch axis | Roll axis |
 |---|---|---|---|---|
 | M5StickC Plus / Plus2 | `atan2(-ax, az)` | `atan2(ay, az)` | X | Y |
-| Core2, CoreS3, others | `atan2(ay, az)` | `atan2(-ax, az)` | Y | X |
+| Core2, CoreS3, Grey, others | `atan2(ay, az)` | `atan2(-ax, az)` | Y | X |
 
 The IMU inside the StickC series is mounted so that its X axis runs along the physical long axis of the case; tipping the long end therefore changes the X gravity component. Core2 / CoreS3 have the IMU oriented the other way around.
 
@@ -383,6 +385,8 @@ Sets the device clock to the given UTC time and switches to solar mode. The devi
 The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. Everything after the datetime on the command line is used as the label, verbatim including any internal spaces, so multi-word timezone names such as `New York` are supported. The label is for display purposes only and does not affect the stored UTC time. The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`東京標準時間`).
 
 The UTC time is written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and rebuilds the running clock automatically. The timezone label and UTC offset are not stored in the RTC; use `PERSIST` to save them to NVM.
+
+On devices without an onboard RTC (e.g. **M5Stack Grey**) the RTC write is silently skipped. The clock still ticks correctly for the rest of the session — `GET_TIME` returns the correct time and the TIME screen advances normally — but the time anchor is not preserved across power cycles. After each reboot `SET_TIME` must be re-sent.
 
 | Suffix | UTC stored | Label default | Example |
 |---|---|---|---|
@@ -1061,3 +1065,5 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 ## Acknowledgements
 
 Thanks to [@senshu-hiro](https://github.com/senshu-hiro) for the idea and initial implementation of the 3D orientation viewer, and for suggesting several features that made it into the firmware: the `BEEP` command, time-zone support in `SET_TIME`, the `CALIBRATE` command, multi-product support (Core 2 and CoreS3), and adaptive newline termination in BLE responses.
+
+Thanks to [@senshu-hiro2](https://github.com/senshu-hiro2) for reporting the RTC-less device bug (M5Stack Grey) and submitting the patch that became Changes 1–5 in patch-23b: the `SET_TIME` in-memory anchor fix, `SET_TIME_ZONE` offset validation, `rebuildAnchor` conditional guard, timezone label centering, and the `~` alias for negative UTC offsets in `m5ctl`.

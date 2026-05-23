@@ -25,18 +25,18 @@ static time_t readRtcEpoch() {
 }
 
 void Nvm::rebuildAnchor(DeviceState& s) {
-    time_t utc = readRtcEpoch();
-    s.utcAnchorSec = utc;
-    s.anchorUs     = esp_timer_get_time();
+    time_t rtcUtc = readRtcEpoch();
+    if (rtcUtc != 0) s.utcAnchorSec = rtcUtc;
+    s.anchorUs = esp_timer_get_time();
 
-    if (utc == 0) {
+    if (s.utcAnchorSec == 0) {
         s.lstPhaseQ40 = 0;
         return;
     }
 
     // Linear GMST formula: error < 0.006 s at year 2100 — adequate for amateur use.
     double lon  = isnan(s.longitudeDeg) ? 0.0 : (double)s.longitudeDeg;
-    int64_t dt  = (int64_t)utc - (int64_t)J2000_UNIX_SEC;
+    int64_t dt  = (int64_t)s.utcAnchorSec - (int64_t)J2000_UNIX_SEC;
     double gmst = fmod(GMST_J2000_SEC + (double)dt * 1.002737909350795, 86400.0);
     if (gmst < 0.0) gmst += 86400.0;
     double lst  = fmod(gmst + lon * 240.0, 86400.0);
