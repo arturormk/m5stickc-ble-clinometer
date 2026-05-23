@@ -212,9 +212,11 @@ class BleServerCallbacks : public BLEServerCallbacks {
 // Command characteristic callbacks — runs on BLE FreeRTOS task
 // ---------------------------------------------------------------------------
 
+// IMPORTANT: kHelpLines must contain STRICTLY FEWER than 31 entries.
+// The Bluedroid BLE TX notification queue holds 31 items; each line is one
+// notification.  If the array reaches 31 entries the last notification may
+// be silently dropped.  Keep well under the limit.
 static const char* const kHelpLines[] = {
-    "Commands: (case-insensitive)",
-    "",
     "PING",
     "GET_TILT",
     "CALIBRATE [gx gy gz]",
@@ -231,19 +233,14 @@ static const char* const kHelpLines[] = {
     "SET_ALTAZ <alt> <az>",
     "SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>",
     "SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>",
-    "  FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24",
-    "  FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Unicode/Latin-1",
-    "  no FONT + non-ASCII text: auto-upgrades to goth24",
     "CANCEL_MSG",
     "START_STREAM <ms>",
     "STOP_STREAM",
     "SET_NIGHT_MODE ON|OFF",
     "BEEP [<notes...>]",
-    "  e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4",
     "PERSIST [CLEAR|RESTORE|READ]",
     "REBOOT",
-    "HELP",
-    "",
+    "HELP",  // must remain last — clients use it as a stream terminator
 };
 static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
 
@@ -370,7 +367,7 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             if (!iso) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
             time_t utcEpoch;
             int32_t offsetSec = 0;
-            char tzBuf[16] = {};
+            char tzBuf[32] = {};
             if (!parseIso8601(iso, &utcEpoch, &offsetSec, tzBuf, sizeof(tzBuf))) {
                 strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
             } else {
@@ -745,13 +742,14 @@ void BleManager::update(DeviceState& state) {
         state.pendingBleResponseReady = false;
     }
 
-    // Send one HELP line per tick to avoid overflowing the BLE TX notification queue
+    // Send one HELP line per tick to avoid overflowing the BLE TX notification queue.
+    // "HELP" is always the last entry and serves as the stream terminator; no
+    // separate "OK" is sent so the client stops as soon as it sees "HELP".
     if (state.pendingBleHelpLine >= 0) {
         if (state.pendingBleHelpLine < kHelpLineCount) {
             sendResponse(kHelpLines[state.pendingBleHelpLine]);
             state.pendingBleHelpLine++;
         } else {
-            sendResponse("OK");
             state.pendingBleHelpLine = -1;
         }
     }

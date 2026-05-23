@@ -165,7 +165,13 @@ void Display::_drawTime(const DeviceState& state) {
 
     // Timezone label top-left
     if (state.timezoneLabel[0] != '\0') {
-        _sprite->setFont(&fonts::Font4);
+        bool hasNonAscii = false;
+        for (const char* p = state.timezoneLabel; *p; p++)
+            if ((uint8_t)*p >= 0x80) { hasNonAscii = true; break; }
+        if (hasNonAscii)
+            _sprite->setFont(&fonts::lgfxJapanGothic_24);
+        else
+            _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_CYAN, n));
         _sprite->setTextDatum(textdatum_t::top_left);
         _sprite->drawString(state.timezoneLabel, 10, 5);

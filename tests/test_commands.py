@@ -15,15 +15,15 @@ from conftest import BleSession
 # HELP
 # ---------------------------------------------------------------------------
 
-async def _collect_help(s) -> list[str]:
-    """Send HELP and collect lines until the OK sentinel."""
-    await s.send_no_wait("HELP")
+async def _collect_help(s, cmd: str = "HELP") -> list[str]:
+    """Send cmd and collect lines; stops when "HELP" (the stream terminator) arrives."""
+    await s.send_no_wait(cmd)
     lines: list[str] = []
     while True:
         pkt = await s.recv(timeout=5.0)
-        if pkt == "OK":
-            break
         lines.append(pkt)
+        if pkt == "HELP":
+            break
     return lines
 
 
@@ -40,26 +40,17 @@ async def test_help_returns_command_list(device_addr):
 async def test_help_synonym(device_addr):
     """? is accepted as a synonym for HELP."""
     async with BleSession(device_addr) as s:
-        await s.send_no_wait("?")
-        lines: list[str] = []
-        while True:
-            pkt = await s.recv(timeout=5.0)
-            if pkt == "OK":
-                break
-            lines.append(pkt)
+        lines = await _collect_help(s, cmd="?")
     assert "PING" in lines
 
 
 @pytest.mark.asyncio
 async def test_help_format(device_addr):
-    """HELP output starts with a header line and blank separator, ends with a blank line,
-    and includes a BEEP melody example after the BEEP synopsis."""
+    """HELP output starts with PING and ends with HELP; no blank or decoration lines."""
     async with BleSession(device_addr) as s:
         lines = await _collect_help(s)
-    assert lines[0] == "Commands: (case-insensitive)"
-    assert lines[1] == ""
-    assert lines[-1] == ""
-    assert "  e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4" in lines
+    assert lines[0] == "PING"
+    assert lines[-1] == "HELP"
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +269,30 @@ async def test_set_time_zone_with_label(device_addr):
 
 
 @pytest.mark.asyncio
+async def test_set_time_zone_label_long_ascii(device_addr):
+    """Label longer than the old 16-byte limit is stored without truncation."""
+    label = "CentralEuropeTime"  # 17 chars / 18 bytes — overflowed the old [16] buffer
+    async with BleSession(device_addr) as s:
+        await s.send(f"SET_TIME_ZONE +01:00 {label}")
+        resp = await s.send("PERSIST")
+        await s.send("PERSIST CLEAR")
+    m = re.search(r"tz=(\S+)", resp)
+    assert m and m.group(1) == label, f"label truncated in PERSIST response: {resp}"
+
+
+@pytest.mark.asyncio
+async def test_set_time_zone_label_cjk(device_addr):
+    """CJK label (18 UTF-8 bytes) is stored without truncation."""
+    label = "東京標準時間"  # 6 × 3 = 18 bytes — old code capped at 15 bytes (5 chars)
+    async with BleSession(device_addr) as s:
+        await s.send(f"SET_TIME_ZONE +09:00 {label}")
+        resp = await s.send("PERSIST")
+        await s.send("PERSIST CLEAR")
+    m = re.search(r"tz=(\S+)", resp)
+    assert m and m.group(1) == label, f"CJK label truncated in PERSIST response: {resp}"
+
+
+@pytest.mark.asyncio
 async def test_set_time_zone_bad_format(device_addr):
     """SET_TIME_ZONE with an unrecognised spec is rejected."""
     async with BleSession(device_addr) as s:
@@ -289,6 +304,7 @@ async def test_set_time_zone_bad_format(device_addr):
 async def test_get_time_gst_mode(device_addr):
     """SET_TIME_ZONE LST without a longitude reports HH:MM:SS GST."""
     async with BleSession(device_addr) as s:
+        await s.send("SET_LONGITUDE NONE")
         await s.send("SET_TIME 2026-05-18T12:00:00Z")
         await s.send("SET_TIME_ZONE LST")
         resp = await s.send("GET_TIME")

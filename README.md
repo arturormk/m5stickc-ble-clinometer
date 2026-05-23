@@ -132,12 +132,10 @@ Subscribe to notifications on the **Response** characteristic to receive replies
 
 ### `HELP`
 
-Returns a concise list of all accepted commands. The device sends one notify packet per command line, followed by an `OK` sentinel that signals the list is complete.
+Returns a concise list of all accepted commands. The device sends one notify packet per command line. `HELP` is always the last packet and serves as the stream terminator — no separate `OK` is sent.
 
 ```
 → HELP
-← Commands: (case-insensitive)
-←
 ← PING
 ← GET_TILT
 ← CALIBRATE [gx gy gz]
@@ -154,23 +152,17 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← SET_ALTAZ <alt> <az>
 ← SHOW_MSG <dur> [FONT:<n>] [BEEP] <text...>
 ← SHOW_MSG_WAIT <dur> <btns> [FONT:<n>] [BEEP] <text...>
-←   FONT: 1=small 2=med(def) 3=dvu18 4=dvu24 5=goth16 6=goth24
-←   FONT 1-4: ASCII only; 5-6 (U8g2 gothic): Unicode/Latin-1
-←   no FONT + non-ASCII text: auto-upgrades to goth24
 ← CANCEL_MSG
 ← START_STREAM <ms>
 ← STOP_STREAM
 ← SET_NIGHT_MODE ON|OFF
 ← BEEP [<notes...>]
-←   e.g. BEEP C'4 G8 -16 G8 A4 G4 -2 B4 C'4
 ← PERSIST [CLEAR|RESTORE|READ]
 ← REBOOT
 ← HELP
-←
-← OK
 ```
 
-Clients should subscribe to notifications and collect packets until they receive `OK`. `?` is accepted as a synonym.
+Clients should subscribe to notifications and collect packets until they receive `HELP`. `?` is accepted as a synonym.
 
 ---
 
@@ -379,10 +371,13 @@ Sets the device clock to the given UTC time and switches to solar mode. The devi
 → SET_TIME 2026-05-14T12:30:00 CET
 ← OK TIME
 
+→ SET_TIME 2026-05-14T12:30:00 東京標準時間
+← OK TIME
+
 ← ERR BAD_TIME
 ```
 
-The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. A space-separated label token is accepted for display purposes and does not affect the stored UTC time.
+The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. A space-separated label token is accepted for display purposes and does not affect the stored UTC time. The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`東京標準時間`).
 
 The UTC time is written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and rebuilds the running clock automatically. The timezone label and UTC offset are not stored in the RTC; use `PERSIST` to save them to NVM.
 
@@ -408,6 +403,9 @@ Sets the display timezone or switches to sidereal mode. Does not alter the store
 → SET_TIME_ZONE +09:00 JST
 ← OK TIMEZONE
 
+→ SET_TIME_ZONE +09:00 東京標準時間
+← OK TIMEZONE
+
 → SET_TIME_ZONE UTC
 ← OK TIMEZONE
 
@@ -423,7 +421,7 @@ Sets the display timezone or switches to sidereal mode. Does not alter the store
 | `UTC` | Solar mode; UTC offset = 0; label `UTC` |
 | `LST` | Sidereal mode; label is `LST` if a longitude is configured, else `GST` |
 
-The optional second token overrides the display label shown in the top-left of the TIME screen (e.g. `SET_TIME_ZONE +09:00 JST` shows `JST`). The label is informational only; the UTC offset is what drives the clock arithmetic.
+The optional second token overrides the display label shown in the top-left of the TIME screen (e.g. `SET_TIME_ZONE +09:00 JST` shows `JST`). The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`SET_TIME_ZONE +09:00 東京標準時間`). The label is informational only; the UTC offset is what drives the clock arithmetic.
 
 Timezone changes take effect immediately for the TIME screen and `GET_TIME`. Use `PERSIST` to save the setting across reboots.
 

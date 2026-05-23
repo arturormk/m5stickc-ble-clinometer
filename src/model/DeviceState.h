@@ -54,7 +54,7 @@ struct DeviceState {
     uint64_t lstPhaseQ40;        // LST phase at anchor (Q40 fixed-point)
     int32_t  timezoneOffsetSec;  // UTC+N offset in seconds for solar display
     float    longitudeDeg;       // Observer longitude °East; NAN = not set
-    char     timezoneLabel[16];  // e.g. "UTC", "+09:00", "JST", "LST", "GST"
+    char     timezoneLabel[32];  // e.g. "UTC", "+09:00", "JST", "LST", "GST"
     bool     siderealMode;       // true when displaying LST/GST
 
     char raText[32];
