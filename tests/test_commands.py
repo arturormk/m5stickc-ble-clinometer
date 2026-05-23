@@ -190,6 +190,18 @@ async def test_set_time_with_named_tz(device_addr):
 
 
 @pytest.mark.asyncio
+async def test_set_time_multiword_label(device_addr):
+    """Multi-word label 'New York' is captured verbatim, not split at the space."""
+    label = "New York"
+    async with BleSession(device_addr) as s:
+        await s.send(f"SET_TIME 2026-05-14T12:30:00-05:00 {label}")
+        resp = await s.send("PERSIST")
+        await s.send("PERSIST CLEAR")
+    m = re.search(r"tz=(.+?)\s+tz_offset=", resp)
+    assert m and m.group(1) == label, f"multi-word label truncated in PERSIST response: {resp}"
+
+
+@pytest.mark.asyncio
 async def test_set_time_no_tz_suffix(device_addr):
     """Bare datetime without Z or offset is accepted."""
     async with BleSession(device_addr) as s:
@@ -290,6 +302,18 @@ async def test_set_time_zone_label_cjk(device_addr):
         await s.send("PERSIST CLEAR")
     m = re.search(r"tz=(\S+)", resp)
     assert m and m.group(1) == label, f"CJK label truncated in PERSIST response: {resp}"
+
+
+@pytest.mark.asyncio
+async def test_set_time_zone_multiword_label_cjk(device_addr):
+    """CJK label with internal space '東京 (標準時)' is stored verbatim (reported by @senshu-hiro2)."""
+    label = "東京 (標準時)"  # space before paren was silently dropped by strtok_r
+    async with BleSession(device_addr) as s:
+        await s.send(f"SET_TIME_ZONE +09:00 {label}")
+        resp = await s.send("PERSIST")
+        await s.send("PERSIST CLEAR")
+    m = re.search(r"tz=(.+?)\s+tz_offset=", resp)
+    assert m and m.group(1) == label, f"CJK label with space truncated in PERSIST response: {resp}"
 
 
 @pytest.mark.asyncio

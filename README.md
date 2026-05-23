@@ -371,13 +371,16 @@ Sets the device clock to the given UTC time and switches to solar mode. The devi
 → SET_TIME 2026-05-14T12:30:00 CET
 ← OK TIME
 
+→ SET_TIME 2026-05-14T12:30:00-05:00 New York
+← OK TIME
+
 → SET_TIME 2026-05-14T12:30:00 東京標準時間
 ← OK TIME
 
 ← ERR BAD_TIME
 ```
 
-The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. A space-separated label token is accepted for display purposes and does not affect the stored UTC time. The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`東京標準時間`).
+The datetime is always `YYYY-MM-DDTHH:MM:SS`. A `+HH:MM` / `-HH:MM` offset suffix is **parsed and subtracted**, so the device stores true UTC — for example, `2026-05-14T12:30:00+01:00` stores `11:30:00 UTC`. Everything after the datetime on the command line is used as the label, verbatim including any internal spaces, so multi-word timezone names such as `New York` are supported. The label is for display purposes only and does not affect the stored UTC time. The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`東京標準時間`).
 
 The UTC time is written to the hardware RTC (PCF8563). On the next power-on the device reads the RTC and rebuilds the running clock automatically. The timezone label and UTC offset are not stored in the RTC; use `PERSIST` to save them to NVM.
 
@@ -385,7 +388,7 @@ The UTC time is written to the hardware RTC (PCF8563). On the next power-on the 
 |---|---|---|---|
 | `Z` | Datetime as-is | `UTC` | `2026-05-14T12:30:00Z` |
 | `+HH:MM` / `-HH:MM` | Offset subtracted | offset string | `2026-05-14T12:30:00+01:00` |
-| separate token | Datetime as-is | the token | `2026-05-14T12:30:00 CET` |
+| separate label | Datetime as-is | label (spaces preserved) | `2026-05-14T12:30:00 New York` |
 | (none) | Datetime as-is | nothing | `2026-05-14T12:30:00` |
 
 No DST logic is applied. To change the display timezone after setting the time, use `SET_TIME_ZONE` — there is no need to re-send `SET_TIME`.
@@ -406,6 +409,9 @@ Sets the display timezone or switches to sidereal mode. Does not alter the store
 → SET_TIME_ZONE +09:00 東京標準時間
 ← OK TIMEZONE
 
+→ SET_TIME_ZONE +09:00 東京 (標準時)
+← OK TIMEZONE
+
 → SET_TIME_ZONE UTC
 ← OK TIMEZONE
 
@@ -421,7 +427,7 @@ Sets the display timezone or switches to sidereal mode. Does not alter the store
 | `UTC` | Solar mode; UTC offset = 0; label `UTC` |
 | `LST` | Sidereal mode; label is `LST` if a longitude is configured, else `GST` |
 
-The optional second token overrides the display label shown in the top-left of the TIME screen (e.g. `SET_TIME_ZONE +09:00 JST` shows `JST`). The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese (`SET_TIME_ZONE +09:00 東京標準時間`). The label is informational only; the UTC offset is what drives the clock arithmetic.
+Everything after `<spec>` on the command line overrides the display label shown in the top-left of the TIME screen, verbatim including any internal spaces — so `SET_TIME_ZONE +09:00 JST` shows `JST` and `SET_TIME_ZONE +09:00 東京 (標準時)` shows `東京 (標準時)`. The label may be any UTF-8 string up to 31 bytes, including multi-byte scripts such as Japanese. The label is informational only; the UTC offset is what drives the clock arithmetic.
 
 Timezone changes take effect immediately for the TIME screen and `GET_TIME`. Use `PERSIST` to save the setting across reboots.
 

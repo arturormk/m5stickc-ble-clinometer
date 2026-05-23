@@ -371,10 +371,13 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
             if (!parseIso8601(iso, &utcEpoch, &offsetSec, tzBuf, sizeof(tzBuf))) {
                 strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
             } else {
-                // Optional label token overrides the auto-derived label
-                char* labelTok = strtok_r(nullptr, " ", &saveptr);
-                if (labelTok && labelTok[0])
-                    snprintf(tzBuf, sizeof(tzBuf), "%s", labelTok);
+                // Use saveptr directly so multi-word labels like "New York" or
+                // "東京 (標準時)" are captured verbatim (strtok_r would split on spaces).
+                // Guard against NULL: newlib sets saveptr=NULL when the token ends at \0.
+                const char* labelStart = saveptr ? saveptr : "";
+                while (*labelStart == ' ') labelStart++;
+                if (*labelStart)
+                    snprintf(tzBuf, sizeof(tzBuf), "%s", labelStart);
                 // Write true UTC to RTC
                 if (M5.Rtc.isEnabled()) {
                     struct tm utcTm;
@@ -395,7 +398,11 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "SET_TIME_ZONE") == 0) {
             char* spec = strtok_r(nullptr, " ", &saveptr);
             if (!spec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            char* labelOverride = strtok_r(nullptr, " ", &saveptr);
+            // Use saveptr directly so multi-word labels like "New York" or
+            // "東京 (標準時)" are captured verbatim (strtok_r would split on spaces).
+            // Guard against NULL: newlib sets saveptr=NULL when the token ends at \0.
+            const char* labelStart = saveptr ? saveptr : "";
+            while (*labelStart == ' ') labelStart++;
             if (strcasecmp(spec, "UTC") == 0) {
                 s_state->siderealMode      = false;
                 s_state->timezoneOffsetSec = 0;
@@ -415,8 +422,8 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
                 goto respond;
             }
-            if (labelOverride && labelOverride[0]) {
-                strncpy(s_state->timezoneLabel, labelOverride, sizeof(s_state->timezoneLabel) - 1);
+            if (*labelStart) {
+                strncpy(s_state->timezoneLabel, labelStart, sizeof(s_state->timezoneLabel) - 1);
                 s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
             }
             Nvm::rebuildAnchor(*s_state);
