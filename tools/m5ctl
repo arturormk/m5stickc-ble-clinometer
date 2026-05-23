@@ -14,10 +14,26 @@ _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
 
 
+def _get_conf_path() -> pathlib.Path:
+    if getattr(sys, 'frozen', False):
+        local = pathlib.Path(sys.executable).parent / "m5ctl.conf"
+        if local.is_file():
+            return local
+    else:
+        project_root = pathlib.Path(__file__).resolve().parent.parent / ".m5ctl.conf"
+        if project_root.is_file():
+            return project_root
+        tools_local = pathlib.Path(__file__).resolve().parent / "m5ctl.conf"
+        if tools_local.is_file():
+            return tools_local
+    return pathlib.Path.home() / ".m5ctl.conf"
+
+
 def _load_device_addr() -> str | None:
-    if not _CONF_FILE.is_file():
+    conf_file = _get_conf_path()
+    if not conf_file.is_file():
         return None
-    for raw in _CONF_FILE.read_text().splitlines():
+    for raw in conf_file.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

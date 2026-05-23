@@ -810,7 +810,7 @@ uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 usage: m5ctl [-h] [-d ADDR] [-t SEC] COMMAND ...
 
 options:
-  -d ADDR   BLE MAC address. Priority: --device > $M5_BLE_ADDR > .m5ctl.conf
+  -d ADDR   BLE MAC address. Priority: --device > $M5_BLE_ADDR > conf file (project root, tools/, or ~/)
   -t SEC    seconds to wait for a response (default: 5)
 ```
 
@@ -881,7 +881,20 @@ The BLE MAC address of your device is looked up in this order:
 
 1. `--device ADDR` CLI flag
 2. `M5_BLE_ADDR` environment variable
-3. `.m5ctl.conf` config file at the project root (gitignored)
+3. Config file — searched in the following locations, stopping at the first match:
+
+   **Running from Python source (`uv run tools/m5ctl …`):**
+   | Location | Filename | Notes |
+   |---|---|---|
+   | Project root | `.m5ctl.conf` | Original location — backward compatible |
+   | `tools/` directory | `m5ctl.conf` | Alternative for scripts that run from the tools directory |
+   | Home directory | `~/.m5ctl.conf` | Per-user fallback |
+
+   **Running as a PyInstaller frozen executable (`m5ctl.exe …`):**
+   | Location | Filename | Notes |
+   |---|---|---|
+   | Next to the executable | `m5ctl.conf` | Preferred for portable Windows installs |
+   | Home directory | `~/.m5ctl.conf` | Per-user fallback |
 
 Create `.m5ctl.conf` at the project root with your device's MAC address:
 
@@ -890,7 +903,7 @@ Create `.m5ctl.conf` at the project root with your device's MAC address:
 device=F0:24:F9:9B:E2:52
 ```
 
-Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the three sources provides an address, `m5ctl` exits with an error — `scan` is the only subcommand that works without one.
+Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the sources provides an address, `m5ctl` exits with an error — `scan` is the only subcommand that works without one.
 
 ### `set-time-now` — set device clock to current host time
 
