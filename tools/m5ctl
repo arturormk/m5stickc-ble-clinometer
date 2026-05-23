@@ -167,6 +167,21 @@ _TZ_ABBREVS: dict[str, str] = {
     "AEST": "Australia/Sydney","AEDT": "Australia/Sydney",
 }
 
+# Conventional fixed offsets for common abbreviations (seconds east of UTC).
+# Kept separate from _TZ_ABBREVS so that e.g. "CET" always maps to +01:00
+# rather than to Europe/Paris's DST-current offset (+02:00 in summer).
+_TZ_FIXED_OFFSETS: dict[str, int] = {
+    "GMT":  0,       "WET":  0,       "BST":   3600,
+    "CET":  3600,    "CEST": 7200,
+    "EET":  7200,    "EEST": 10800,
+    "EST": -18000,   "EDT": -14400,
+    "CST": -21600,   "CDT": -18000,
+    "MST": -25200,   "MDT": -21600,
+    "PST": -28800,   "PDT": -25200,
+    "IST":  19800,   "JST":  32400,
+    "AEST": 36000,   "AEDT": 39600,
+}
+
 
 def _resolve_tz(name: str) -> ZoneInfo:
     try:
@@ -180,6 +195,17 @@ def _resolve_tz(name: str) -> ZoneInfo:
         f"Unknown timezone: {name!r}. "
         "Use an IANA name (e.g. Europe/Madrid) or a known abbreviation (CET, CEST, EST…)"
     )
+
+
+def _tz_to_offset_str(name: str) -> str:
+    """Resolve a TZ abbreviation or IANA name to a firmware-compatible +HH:MM/-HH:MM string."""
+    secs = _TZ_FIXED_OFFSETS.get(name.upper())
+    if secs is None:
+        tz = _resolve_tz(name)
+        secs = int(datetime.now(tz).utcoffset().total_seconds())
+    sign = "+" if secs >= 0 else "-"
+    h, m = divmod(abs(secs) // 60, 60)
+    return f"{sign}{h:02d}:{m:02d}"
 
 
 def main() -> None:
@@ -199,7 +225,11 @@ examples:
   m5ctl set-time-now --timezone CEST   # use named timezone
   m5ctl set-time-now --timezone Europe/Madrid
   m5ctl set-time "2026-05-14T12:30:00+01:00"
-  m5ctl set-timezone +09:00 JST        # switch display to JST without re-syncing
+  m5ctl set-timezone JST               # resolves to +09:00, label JST
+  m5ctl set-timezone CET               # resolves to +01:00, label CET
+  m5ctl set-timezone Europe/Madrid     # resolves current offset, label Europe/Madrid
+  m5ctl set-timezone +09:00 JST        # explicit offset with label
+  m5ctl set-timezone ~05:00 EST        # negative offset (~ avoids argparse flag conflict)
   m5ctl set-timezone LST               # switch to sidereal (needs set-longitude first)
   m5ctl set-longitude 135.5            # set observer longitude (Osaka)
   m5ctl set-radec "12:34:56" "+07:08:09"
@@ -289,9 +319,13 @@ examples:
     p = sub.add_parser("set-timezone",
                        help="Set display timezone/mode without changing the clock")
     p.add_argument("spec",
-                   help="Offset (+HH:MM or -HH:MM), UTC, or LST/GST for sidereal")
+                   help=(
+                       "Offset (+HH:MM or -HH:MM), UTC, LST/GST for sidereal, "
+                       "or a timezone abbreviation/IANA name (CET, JST, Europe/Madrid). "
+                       "Use ~ instead of - for negative offsets (e.g. ~05:00)."
+                   ))
     p.add_argument("label", nargs="?", default="",
-                   help="Optional display label override (e.g. JST, CET)")
+                   help="Optional display label override; defaults to spec when spec is a TZ name")
 
     p = sub.add_parser("set-longitude",
                        help="Set observer longitude for sidereal time computation")
@@ -405,9 +439,18 @@ examples:
             do_send(args, cmd)
         case "set-timezone":
             spec = args.spec
+            if spec.startswith("~"):
+                spec = "-" + spec[1:]
+            label = args.label or ""
+            upper = spec.upper()
+            if upper not in ("UTC", "LST", "GST") and not (len(spec) > 1 and spec[0] in "+-"):
+                offset = _tz_to_offset_str(spec)
+                if not label:
+                    label = spec
+                spec = offset
             cmd = f"SET_TIME_ZONE {spec}"
-            if args.label:
-                cmd += f" {args.label}"
+            if label:
+                cmd += f" {label}"
             do_send(args, cmd)
         case "set-longitude":
             do_send(args, f"SET_LONGITUDE {args.degrees}")

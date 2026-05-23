@@ -173,8 +173,9 @@ void Display::_drawTime(const DeviceState& state) {
         else
             _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_CYAN, n));
+        _sprite->setTextDatum(textdatum_t::middle_center);
+        _sprite->drawString(state.timezoneLabel, cx, 16);
         _sprite->setTextDatum(textdatum_t::top_left);
-        _sprite->drawString(state.timezoneLabel, 10, 5);
     }
 
     char timeBuf[12];
@@ -196,10 +197,10 @@ void Display::_drawTime(const DeviceState& state) {
         _sprite->setFont(&fonts::Font7);
         _sprite->setTextColor(_c(TFT_WHITE, n));
         _sprite->setTextDatum(textdatum_t::middle_center);
-        _sprite->drawString(timeBuf, cx, _H * 62 / 135);
+        _sprite->drawString(timeBuf, cx, _H * 66 / 135);
         _sprite->setFont(&fonts::Font4);
         _sprite->setTextColor(_c(TFT_LIGHTGREY, n));
-        _sprite->drawString(dateBuf, cx, _H * 105 / 135);
+        _sprite->drawString(dateBuf, cx, _H * 114 / 135);
         _sprite->setTextDatum(textdatum_t::top_left);
         return;
     }
@@ -208,7 +209,7 @@ void Display::_drawTime(const DeviceState& state) {
     _sprite->setFont(&fonts::Font7);
     _sprite->setTextColor(_c(TFT_WHITE, n));
     _sprite->setTextDatum(textdatum_t::middle_center);
-    _sprite->drawString(timeBuf, cx, _H * 62 / 135);
+    _sprite->drawString(timeBuf, cx, _H * 66 / 135);
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 

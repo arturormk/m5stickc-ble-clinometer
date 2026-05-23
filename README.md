@@ -73,7 +73,7 @@ The **M5 front button** cycles through screens in order:
 | # | Screen | Description |
 |---|---|---|
 | 0 | Clinometer | Bubble level with 1°/2°/3° rings, numeric Pitch/Roll readout |
-| 1 | Time | Current time HH:MM:SS; timezone/LST label in cyan top-left (if set). Solar: date below the digits. Sidereal: no date. |
+| 1 | Time | Current time HH:MM:SS; timezone/LST label centered in cyan at the top (if set). Solar: date below the digits. Sidereal: no date. |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
 | 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
@@ -828,7 +828,7 @@ options:
 | `get-msg` | | Get current message state |
 | `set-time` | `<iso8601> [<label>]` | Set device clock (offset subtracted to store UTC); optional label for display |
 | `set-time-now` | `[--utc\|--local\|--timezone TZ] [--offset N]` | Set device clock to the current host time; local time auto-appends the system TZ abbreviation as label |
-| `set-timezone` | `<+HH:MM\|-HH:MM\|UTC\|LST> [label]` | Set display timezone or switch to sidereal mode |
+| `set-timezone` | `<spec> [label]` | Set display timezone or switch to sidereal mode; spec may be `+HH:MM`/`-HH:MM`, `UTC`, `LST`, a TZ abbreviation (`CET`, `JST`, …), or an IANA name (`Europe/Madrid`); use `~` instead of `-` for negative offsets |
 | `set-longitude` | `<degrees>` | Set observer longitude °East for LST computation |
 | `set-radec` | `<ra> <dec>` | Set RA/Dec display values |
 | `set-altaz` | `<alt> <az>` | Set Alt/Az display values |
@@ -859,7 +859,11 @@ uv run tools/m5ctl set-time-now --timezone CEST
 uv run tools/m5ctl set-time "2026-05-14T12:30:00Z"
 uv run tools/m5ctl set-time "2026-05-14T12:30:00+01:00"
 uv run tools/m5ctl set-time "2026-05-14T12:30:00" CET
-uv run tools/m5ctl set-timezone +09:00 JST
+uv run tools/m5ctl set-timezone JST               # resolves to +09:00, label JST
+uv run tools/m5ctl set-timezone CET               # resolves to +01:00, label CET
+uv run tools/m5ctl set-timezone Europe/Madrid     # resolves current offset, label Europe/Madrid
+uv run tools/m5ctl set-timezone +09:00 JST        # explicit offset with label
+uv run tools/m5ctl set-timezone ~05:00 EST        # negative offset (~ avoids argparse flag conflict)
 uv run tools/m5ctl set-timezone LST
 uv run tools/m5ctl set-longitude 135.5
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
@@ -920,6 +924,26 @@ uv run tools/m5ctl set-time-now --offset 0         # no latency compensation
 Timezone resolution: IANA names (e.g. `Europe/Madrid`, `America/New_York`) are resolved via `zoneinfo`. Common abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their canonical IANA zone for time computation; the label shown on the device screen is always the string you passed.
 
 `set-time-now` sends the current local time with the UTC offset embedded in the ISO 8601 string followed by the system timezone abbreviation as the display label (e.g. `SET_TIME 2026-05-21T20:05:16+02:00 CEST`). The device subtracts the offset to store true UTC, then uses the offset and label to display local time on screen. When `--utc` is used no label is sent; when `--timezone` is used the label is the string you passed.
+
+### `set-timezone` — change display timezone without re-syncing the clock
+
+```bash
+uv run tools/m5ctl set-timezone CET                   # +01:00, label CET
+uv run tools/m5ctl set-timezone CEST                  # +02:00, label CEST
+uv run tools/m5ctl set-timezone JST                   # +09:00, label JST
+uv run tools/m5ctl set-timezone Europe/Madrid         # current offset for that zone, label Europe/Madrid
+uv run tools/m5ctl set-timezone CEST "Madrid/Europe"  # +02:00, explicit label
+uv run tools/m5ctl set-timezone ~05:00 EST            # negative offset without argparse conflict
+uv run tools/m5ctl set-timezone +09:00 JST            # explicit offset — passed straight through
+uv run tools/m5ctl set-timezone UTC                   # UTC
+uv run tools/m5ctl set-timezone LST                   # sidereal mode
+```
+
+`set-timezone` accepts the same TZ abbreviations and IANA zone names as `set-time-now --timezone`, but it only changes the display offset and label — it does **not** alter the stored UTC time. This is the right command when the clock is already set correctly and you just want to switch the on-screen timezone (for example, after flying to a different zone).
+
+**Abbreviation resolution:** Known abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their **conventional fixed offsets** — `CET` is always `+01:00`, `CEST` is always `+02:00`, regardless of the current date. This is intentional: the abbreviation itself encodes the expected offset. IANA zone names (e.g. `Europe/Madrid`, `America/New_York`) resolve to the **current** UTC offset of that zone, including DST.
+
+**Negative offsets:** argparse treats arguments starting with `-` as flags. The strictly correct POSIX way to pass a negative offset on a Linux terminal is `-- -07:00 PST` (the `--` signals end of options). The `~` alias (`~07:00 PST`) achieves the same result and is more portable across terminals (Windows CMD, PowerShell, macOS) where `--` may not be recognised or may behave differently; m5ctl translates `~` to `-` before sending the BLE command.
 
 ### tests/3d_model.py — real-time 3D orientation viewer
 
@@ -1013,6 +1037,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   ├── test_commands.py   BLE command interface tests
 │   ├── test_newline.py    Newline-framing protocol tests
 │   ├── test_sanitize.py   Input sanitisation tests (NBSP/ideographic-space normalisation, control-char rejection)
+│   ├── test_m5ctl.py      Unit tests for m5ctl helpers (no device required — always run)
 │   └── 3d_model.py        Real-time 3D orientation viewer (pygame + PyOpenGL)
 └── docs/
     └── m5stickc-clinometer-ble-spec.md   Full design specification
