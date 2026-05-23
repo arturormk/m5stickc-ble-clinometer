@@ -418,6 +418,9 @@ Sets the display timezone or switches to sidereal mode. Does not alter the store
 → SET_TIME_ZONE LST
 ← OK TIMEZONE
 
+→ SET_TIME_ZONE +bad
+← ERR BAD_TZ
+
 ← ERR BAD_ARGS
 ```
 
@@ -777,6 +780,7 @@ TILT +0.38 -1.12 0.99
 | `ERR UNKNOWN_COMMAND` | Command token not recognised |
 | `ERR BAD_ARGS` | Wrong number or format of arguments |
 | `ERR BAD_TIME` | `SET_TIME` value could not be parsed |
+| `ERR BAD_TZ` | `SET_TIME_ZONE` offset spec is malformed (e.g. `+bad` or `+5` without minutes) |
 | `ERR BAD_MELODY <melody>` | `BEEP` received an unrecognised note token; the melody string is echoed back with `^` inserted before the first invalid token |
 | `ERR INVALID_CHAR U+XXXX` | Command write contained an ASCII control character; `XXXX` is the hex code point of the first offending byte. NBSP (U+00A0) and ideographic space (U+3000) are normalised to space and do not trigger this error. |
 

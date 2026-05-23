@@ -325,6 +325,22 @@ async def test_set_time_zone_bad_format(device_addr):
 
 
 @pytest.mark.asyncio
+async def test_set_time_zone_malformed_offset(device_addr):
+    """SET_TIME_ZONE +bad (non-numeric after sign) returns ERR BAD_TZ."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME_ZONE +bad")
+    assert resp == "ERR BAD_TZ"
+
+
+@pytest.mark.asyncio
+async def test_set_time_zone_partial_offset(device_addr):
+    """SET_TIME_ZONE +5 (hours only, no minutes) returns ERR BAD_TZ."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_TIME_ZONE +5")
+    assert resp == "ERR BAD_TZ"
+
+
+@pytest.mark.asyncio
 async def test_get_time_gst_mode(device_addr):
     """SET_TIME_ZONE LST without a longitude reports HH:MM:SS GST."""
     async with BleSession(device_addr) as s:

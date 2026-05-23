@@ -413,7 +413,10 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 strncpy(s_state->timezoneLabel, defaultLabel, sizeof(s_state->timezoneLabel) - 1);
             } else if (spec[0] == '+' || spec[0] == '-') {
                 int sign = (spec[0] == '+') ? 1 : -1, hh = 0, mm = 0;
-                sscanf(spec + 1, "%d:%d", &hh, &mm);
+                if (sscanf(spec + 1, "%d:%d", &hh, &mm) != 2) {
+                    strncpy(resp, "ERR BAD_TZ", sizeof(resp) - 1);
+                    goto respond;
+                }
                 s_state->siderealMode      = false;
                 s_state->timezoneOffsetSec = sign * (hh * 3600 + mm * 60);
                 strncpy(s_state->timezoneLabel, spec, sizeof(s_state->timezoneLabel) - 1);
