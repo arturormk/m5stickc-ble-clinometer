@@ -14,6 +14,7 @@ from bleak import BleakClient, BleakScanner, BleakError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
+_VERSION   = "1.0"
 
 
 def _get_conf_path() -> pathlib.Path:
@@ -42,8 +43,108 @@ def _load_device_addr() -> str | None:
         if "=" in line:
             key, _, val = line.partition("=")
             if key.strip() == "device":
-                return val.strip() or None
+                val = val.strip()
+                if not val:
+                    return None
+                # Raw MAC → use directly; anything else is a name reference.
+                if len(val) == 17 and val.count(":") == 5:
+                    return val
+                return _load_all_devices().get(val)
     return None
+
+
+def _load_all_devices() -> dict[str, str]:
+    """Return {name: mac} for all device.NAME entries in the config file."""
+    conf_file = _get_conf_path()
+    if not conf_file.is_file():
+        return {}
+    devices: dict[str, str] = {}
+    for raw in conf_file.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if key.startswith("device."):
+            name = key[len("device."):]
+            if name:
+                devices[name] = val
+    return devices
+
+
+def _resolve_device(selector: str | None) -> str | None:
+    """Resolve a -d selector to a BLE MAC address.
+
+    Priority:
+      1. Raw MAC (17 chars, 5 colons) → pass through unchanged.
+      2. Named key → look up in _load_all_devices(); sys.exit if not found.
+      3. No selector → M5_BLE_ADDR env var.
+      4. No env var → bare 'device' entry in conf file.
+    """
+    if selector is not None:
+        if len(selector) == 17 and selector.count(":") == 5:
+            return selector
+        devices = _load_all_devices()
+        if selector in devices:
+            return devices[selector]
+        print(f"error: device {selector!r} not found in config.", file=sys.stderr)
+        sys.exit(1)
+    return os.environ.get(_ENV_VAR) or _load_device_addr()
+
+
+async def _check_reachable(
+    devices: dict[str, str],
+) -> dict[str, tuple[bool, int | None, str | None]]:
+    """1-second scan; return {name: (reachable, rssi, ble_name)} for each device."""
+    results = await BleakScanner.discover(timeout=1.0, return_adv=True)
+    seen = {d.address: (adv.rssi, d.name) for d, adv in results.values()}
+    return {
+        name: (
+            mac in seen,
+            seen[mac][0] if mac in seen else None,
+            seen[mac][1] if mac in seen else None,
+        )
+        for name, mac in devices.items()
+    }
+
+
+def cmd_list() -> None:
+    conf = _get_conf_path()
+    devices = _load_all_devices()
+    env = os.environ.get(_ENV_VAR)
+
+    print(f"m5ctl {_VERSION}")
+    print(f"Config: {conf}")
+    print(f"{_ENV_VAR}: {env or '(not set)'}")
+
+    # Prepend env var device if its MAC isn't already covered by a named entry.
+    if env and env not in devices.values():
+        devices = {f"${_ENV_VAR}": env} | devices
+
+    if not devices:
+        print("\nNo devices configured.")
+        print(f"Set ${_ENV_VAR} or add entries like:  device.main = AA:BB:CC:DD:EE:FF")
+        return
+
+    reachability: dict[str, tuple[bool, int | None, str | None]] = {}
+
+    async def go() -> None:
+        nonlocal reachability
+        reachability = await _check_reachable(devices)
+
+    run(go())
+
+    width = max(len(name) for name in devices)
+    print()
+    for name, mac in devices.items():
+        reachable, rssi, ble_name = reachability.get(name, (False, None, None))
+        status = "reachable  " if reachable else "unreachable"
+        rssi_str = f"{rssi:4d} dBm" if rssi is not None else "    —    "
+        name_str = (ble_name or "(unknown)").ljust(20)
+        print(f"  {name:{width}}  {mac}  {status}  {rssi_str}  {name_str}")
 
 
 CONNECT_TIMEOUT = 10.0
@@ -142,11 +243,18 @@ async def cmd_scan() -> None:
     if not results:
         print("No devices found.")
         return
+
+    known = {mac: name for name, mac in _load_all_devices().items()}
+    bare = _load_device_addr()
+    if bare and bare not in known:
+        known[bare] = "device"
+
     pairs = sorted(results.values(), key=lambda x: x[1].rssi or -999, reverse=True)
     for d, adv in pairs:
         name = d.name or "(unknown)"
         rssi = adv.rssi or -999
-        print(f"  {d.address}  {rssi:4d} dBm  {name}")
+        tag = f"  [{known[d.address]}]" if d.address in known else ""
+        print(f"  {d.address}  {rssi:4d} dBm  {name}{tag}")
 
 
 def run(coro) -> None:
@@ -237,6 +345,11 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
+  m5ctl version
+  m5ctl list                # show configured devices with reachability (1-second scan)
+  m5ctl scan                # discover all nearby BLE devices
+  m5ctl -d main tilt        # select device by config name (device.main = MAC in conf)
+  m5ctl -d 0 tilt           # select by numeric config key (device.0 = MAC)
   m5ctl tilt                # pitch, roll in degrees, gravity magnitude in g
   m5ctl calibrate                             # zero at current orientation; prints ref vector
   m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
@@ -277,12 +390,12 @@ examples:
     )
     parser.add_argument(
         "-d", "--device",
-        default=os.environ.get(_ENV_VAR) or _load_device_addr(),
-        metavar="ADDR",
+        default=None,
+        metavar="ADDR_OR_NAME",
         help=(
-            f"BLE MAC address of the device. "
-            f"Priority: --device > ${_ENV_VAR} > {_CONF_FILE.name}. "
-            f"Create .m5ctl.conf in the project root with: device=AA:BB:CC:DD:EE:FF"
+            f"BLE address or config name (e.g. 'main'). "
+            f"Priority: --device > ${_ENV_VAR} > conf file. "
+            f"Named: 'device.main = MAC'. Default alias: 'device = main'."
         ),
     )
     parser.add_argument(
@@ -295,6 +408,9 @@ examples:
 
     sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
     sub.required = True
+
+    sub.add_parser("list",    help="List configured devices with reachability status")
+    sub.add_parser("version", help="Show m5ctl version")
 
     # --- simple query commands ---
     sub.add_parser("help",        help="List all accepted BLE commands")
@@ -409,13 +525,24 @@ examples:
         pass
     args = parser.parse_args(_argv)
 
-    if args.cmd != "scan" and not args.device:
-        print(
-            f"error: no device address configured.\n"
-            f"  Set ${_ENV_VAR}, create {_CONF_FILE}, or use --device ADDR.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if args.cmd == "version":
+        print(f"m5ctl {_VERSION}")
+        return
+
+    if args.cmd == "list":
+        cmd_list()
+        return
+
+    if args.cmd != "scan":
+        args.device = _resolve_device(args.device)
+        if not args.device:
+            print(
+                f"error: no device address configured.\n"
+                f"  Set ${_ENV_VAR}, use --device ADDR_OR_NAME, or add a\n"
+                f"  'device = MAC' or 'device.NAME = MAC' entry to {_CONF_FILE.name}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     match args.cmd:
         case "help":

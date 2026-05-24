@@ -815,15 +815,18 @@ uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 `tools/m5ctl` is a Python 3 command-line client for the BLE interface.
 
 ```
-usage: m5ctl [-h] [-d ADDR] [-t SEC] COMMAND ...
+usage: m5ctl [-h] [-d ADDR_OR_NAME] [-t SEC] COMMAND ...
 
 options:
-  -d ADDR   BLE MAC address. Priority: --device > $M5_BLE_ADDR > conf file (project root, tools/, or ~/)
-  -t SEC    seconds to wait for a response (default: 5)
+  -d ADDR_OR_NAME   Device address or config name. Priority: --device > $M5_BLE_ADDR > conf file
+  -t SEC            seconds to wait for a response (default: 5)
 ```
 
 | Command | Arguments | Description |
 |---|---|---|
+| `version` | | Show m5ctl version (no device required) |
+| `list` | | Scan configured devices for reachability and print a table (1-second scan; no device required) |
+| `scan` | | Scan for nearby BLE devices; annotates devices found in the conf file with their config name |
 | `help` | | List all accepted BLE commands |
 | `ping` | | Ping the device |
 | `tilt` | | Get current pitch/roll angles |
@@ -852,11 +855,15 @@ options:
 | `persist-clear` | | Invalidate stored NVM settings with a single flash write |
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
 | `reboot` | | Software-reset the device |
-| `scan` | | Scan for nearby BLE devices |
 
 Examples:
 
 ```bash
+uv run tools/m5ctl version
+uv run tools/m5ctl list
+uv run tools/m5ctl scan
+uv run tools/m5ctl -d main tilt           # select by config name (device.main = MAC in conf)
+uv run tools/m5ctl -d 0 tilt             # select by numeric key  (device.0  = MAC in conf)
 uv run tools/m5ctl help
 uv run tools/m5ctl tilt
 uv run tools/m5ctl status
@@ -889,11 +896,13 @@ uv run tools/m5ctl listen
 
 ### Device address configuration
 
-The BLE MAC address of your device is looked up in this order:
+The device is resolved from `-d ADDR_OR_NAME` in this order:
 
-1. `--device ADDR` CLI flag
-2. `M5_BLE_ADDR` environment variable
-3. Config file — searched in the following locations, stopping at the first match:
+1. **Raw MAC** — `--device AA:BB:CC:DD:EE:FF` passes through directly.
+2. **Config name** — `--device main` looks up `device.main` in the conf file; exits with an error if not found.
+3. **No `-d`** — falls back to `M5_BLE_ADDR` environment variable, then the bare `device` entry in the conf file.
+
+Config file lookup searches the following locations, stopping at the first match:
 
    **Running from Python source (`uv run tools/m5ctl …`):**
    | Location | Filename | Notes |
@@ -908,14 +917,55 @@ The BLE MAC address of your device is looked up in this order:
    | Next to the executable | `m5ctl.conf` | Preferred for portable Windows installs |
    | Home directory | `~/.m5ctl.conf` | Per-user fallback |
 
-Create `.m5ctl.conf` at the project root with your device's MAC address:
+**Single device** — create `.m5ctl.conf` at the project root:
 
 ```ini
 # .m5ctl.conf — gitignored, do not commit
-device=F0:24:F9:9B:E2:52
+device = F0:24:F9:9B:E2:52
 ```
 
-Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the sources provides an address, `m5ctl` exits with an error — `scan` is the only subcommand that works without one.
+**Multiple devices** — use `device.NAME` entries (dot notation):
+
+```ini
+# .m5ctl.conf — gitignored, do not commit
+device.main  = F0:24:F9:9B:E2:52   # telescope mount
+device.guide = 3C:AB:CD:EF:01:56   # guide scope
+device.grey  = 80:EF:AB:CD:12:36   # spare M5Stack Grey
+```
+
+The key after the dot is the name shown in `m5ctl list`. Numeric names (`device.0`, `device.1`) are accepted.
+
+**Setting a default device** — the bare `device` entry is always the fallback when no `-d` flag is given. Its value can be either a raw MAC or the name of a named entry:
+
+```ini
+device.main  = F0:24:F9:9B:E2:52
+device.guide = 3C:AB:CD:EF:01:56
+device = main          # m5ctl tilt (no -d) uses device.main
+```
+
+With this config, `m5ctl tilt` is equivalent to `m5ctl -d main tilt`, and `m5ctl -d guide tilt` still selects the other device. A bare `device = MAC` (original format) continues to work as before.
+
+`m5ctl list` performs a 1-second BLE scan and shows the reachability, RSSI, and BLE-advertised name for every named entry:
+
+```
+m5ctl 1.0
+Config: /home/user/project/.m5ctl.conf
+M5_BLE_ADDR: (not set)
+
+  main   F0:24:F9:9B:E2:52  reachable    -36 dBm  M5-NexStar-Level    
+  guide  3C:AB:CD:EF:01:56  reachable    -49 dBm  M5-NexStar-Level    
+  grey   80:EF:AB:CD:12:36  unreachable     —      (unknown)           
+```
+
+`m5ctl scan` annotates any discovered device whose MAC appears in the conf file:
+
+```
+  F0:24:F9:9B:E2:52   -36 dBm  M5-NexStar-Level  [main]
+  3C:AB:CD:EF:01:56   -49 dBm  M5-NexStar-Level  [guide]
+  AA:BB:CC:DD:EE:FF   -72 dBm  iPhone
+```
+
+Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the sources provides an address, `m5ctl` exits with an error — `scan`, `list`, and `version` are the only subcommands that work without one.
 
 ### `set-time-now` — set device clock to current host time
 
@@ -1066,4 +1116,4 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 Thanks to [@senshu-hiro](https://github.com/senshu-hiro) for the idea and initial implementation of the 3D orientation viewer, and for suggesting several features that made it into the firmware: the `BEEP` command, time-zone support in `SET_TIME`, the `CALIBRATE` command, multi-product support (Core 2 and CoreS3), and adaptive newline termination in BLE responses.
 
-Thanks to [@senshu-hiro2](https://github.com/senshu-hiro2) for reporting the RTC-less device bug (M5Stack Grey) and submitting the patch that became Changes 1–5 in patch-23b: the `SET_TIME` in-memory anchor fix, `SET_TIME_ZONE` offset validation, `rebuildAnchor` conditional guard, timezone label centering, and the `~` alias for negative UTC offsets in `m5ctl`.
+Thanks to [@senshu-hiro2](https://github.com/senshu-hiro2) for reporting the RTC-less device bug (M5Stack Grey) and submitting the patch that became Changes 1–5 in patch-23b: the `SET_TIME` in-memory anchor fix, `SET_TIME_ZONE` offset validation, `rebuildAnchor` conditional guard, timezone label centering, and the `~` alias for negative UTC offsets in `m5ctl`. Also for proposing the multi-device config format, `m5ctl list`, `m5ctl version`, and BLE connection retry — features that became Issues 1–5 of the m5ctl improvement series.
