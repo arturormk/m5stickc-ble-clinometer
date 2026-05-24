@@ -4,6 +4,7 @@
 import asyncio
 import argparse
 import os
+import re
 import pathlib
 import sys
 from datetime import datetime, timezone, timedelta
@@ -371,7 +372,21 @@ examples:
                         "Octave: ' up, , down from middle C. "
                         "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
 
-    args = parser.parse_args()
+    # argparse treats -HH:MM as an unknown flag because it starts with '-'.
+    # Rewrite it to ~HH:MM so the positional is accepted; the handler converts
+    # it back to -HH:MM before sending to firmware.
+    # argparse treats -HH:MM as an unknown flag because it starts with '-'.
+    # Rewrite it to ~HH:MM so the positional is accepted; the handler converts
+    # it back to -HH:MM before sending to firmware.
+    _argv = sys.argv[1:]
+    try:
+        _i = _argv.index("set-timezone")
+        if _i + 1 < len(_argv) and re.fullmatch(r'-\d\d:\d\d', _argv[_i + 1]):
+            _argv = list(_argv)
+            _argv[_i + 1] = '~' + _argv[_i + 1][1:]
+    except ValueError:
+        pass
+    args = parser.parse_args(_argv)
 
     if args.cmd != "scan" and not args.device:
         print(
