@@ -9,6 +9,7 @@ import pathlib
 import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from contextlib import asynccontextmanager
 from bleak import BleakClient, BleakScanner, BleakError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
@@ -52,6 +53,26 @@ RESP_UUID   = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
 STATUS_UUID = "7d91b003-8f3b-4b63-b6a4-5d1e6b7a1000"
 
 
+@asynccontextmanager
+async def _connect(address: str, timeout: float, retries: int = 3):
+    client = BleakClient(address, timeout=timeout)
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            await client.connect()
+            break
+        except BleakError as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                await asyncio.sleep(0.3 * (attempt + 1))
+    else:
+        raise last_exc  # type: ignore[misc]
+    try:
+        yield client
+    finally:
+        await client.disconnect()
+
+
 async def send_and_receive(address: str, command: str, timeout: float) -> str:
     """Connect, send one command, wait for the notify response, disconnect."""
     loop = asyncio.get_running_loop()
@@ -61,7 +82,7 @@ async def send_and_receive(address: str, command: str, timeout: float) -> str:
         if not fut.done():
             fut.set_result(data.decode("utf-8", errors="replace").strip())
 
-    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+    async with _connect(address, CONNECT_TIMEOUT) as client:
         await client.start_notify(RESP_UUID, on_notify)
         await client.write_gatt_char(CMD_UUID, command.encode("utf-8"), response=False)
         try:
@@ -83,7 +104,7 @@ async def cmd_help(address: str, timeout: float) -> None:
         if text == "HELP" and not done.done():
             done.set_result(None)
 
-    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+    async with _connect(address, CONNECT_TIMEOUT) as client:
         await client.start_notify(RESP_UUID, on_notify)
         await client.write_gatt_char(CMD_UUID, b"HELP", response=False)
         try:
@@ -102,7 +123,7 @@ async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
         print(data.decode("utf-8", errors="replace").strip(), flush=True)
 
     print(f"Listening on {address} — Ctrl+C to stop", file=sys.stderr)
-    async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+    async with _connect(address, CONNECT_TIMEOUT) as client:
         await client.start_notify(RESP_UUID, on_notify)
         if stream_ms is not None:
             period = max(100, stream_ms)

@@ -9,6 +9,7 @@ import re
 import sys
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 _TOOLS = pathlib.Path(__file__).parent.parent / "tools"
 
@@ -154,3 +155,59 @@ def test_handler_iana_name(m5ctl, monkeypatch):
     """IANA zone name is resolved; original name becomes the display label."""
     assert _cmd(m5ctl, monkeypatch, "set-timezone", "Asia/Tokyo") \
         == "SET_TIME_ZONE +09:00 Asia/Tokyo"
+
+
+# ---------------------------------------------------------------------------
+# _connect — retry logic (no real device required)
+# ---------------------------------------------------------------------------
+
+def _mock_ble(m5ctl, monkeypatch, connect_side_effect):
+    """Patch BleakClient and asyncio.sleep; return (mock_client, mock_sleep)."""
+    from bleak import BleakError  # noqa: F401 — ensure importable
+    mock_client = MagicMock()
+    mock_client.connect = AsyncMock(side_effect=connect_side_effect)
+    mock_client.disconnect = AsyncMock()
+    monkeypatch.setattr(m5ctl, "BleakClient", lambda *a, **kw: mock_client)
+    mock_sleep = AsyncMock()
+    monkeypatch.setattr(m5ctl.asyncio, "sleep", mock_sleep)
+    return mock_client, mock_sleep
+
+
+async def test_connect_first_attempt_succeeds(m5ctl, monkeypatch):
+    """connect() succeeds immediately — no sleep, disconnect called once."""
+    client, sleep = _mock_ble(m5ctl, monkeypatch, [None])
+
+    async with m5ctl._connect("AA:BB:CC:DD:EE:FF", 10.0) as c:
+        assert c is client
+
+    client.connect.assert_awaited_once()
+    client.disconnect.assert_awaited_once()
+    sleep.assert_not_awaited()
+
+
+async def test_connect_retries_on_transient_failure(m5ctl, monkeypatch):
+    """First connect() raises BleakError; second attempt succeeds."""
+    from bleak import BleakError
+    client, sleep = _mock_ble(m5ctl, monkeypatch, [BleakError("transient"), None])
+
+    async with m5ctl._connect("AA:BB:CC:DD:EE:FF", 10.0) as c:
+        assert c is client
+
+    assert client.connect.await_count == 2
+    sleep.assert_awaited_once_with(0.3)
+    client.disconnect.assert_awaited_once()
+
+
+async def test_connect_raises_after_all_retries_exhausted(m5ctl, monkeypatch):
+    """All 3 attempts fail — last BleakError re-raised, disconnect never called."""
+    from bleak import BleakError
+    err = BleakError("device not found")
+    client, sleep = _mock_ble(m5ctl, monkeypatch, [err, err, err])
+
+    with pytest.raises(BleakError):
+        async with m5ctl._connect("AA:BB:CC:DD:EE:FF", 10.0):
+            pass
+
+    assert client.connect.await_count == 3
+    assert sleep.await_count == 2  # after attempt 0 (0.3 s) and attempt 1 (0.6 s)
+    client.disconnect.assert_not_awaited()
