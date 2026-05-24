@@ -2,15 +2,15 @@
 
 A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (ESP32). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
 
-![Bubble Level](docs/images/clinometer_bubble.jpg)
+![Bubble Level](docs/images/clinometer_bubble.png)
 
-![Date/Time](docs/images/clinometer_datetime.jpg)
+![Date/Time](docs/images/clinometer_datetime.png)
 
-![RA Dec](docs/images/clinometer_radec.jpg)
+![RA Dec](docs/images/clinometer_radec.png)
 
-![Alt Az](docs/images/clinometer_altaz.jpg)
+![Alt Az](docs/images/clinometer_altaz.png)
 
-![Battery](docs/images/clinometer_battery.jpg)
+![Battery](docs/images/clinometer_battery.png)
 
 ## What it does
 
