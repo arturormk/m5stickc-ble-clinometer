@@ -196,12 +196,32 @@ def test_load_device_addr_unknown_alias_returns_none(m5ctl, monkeypatch, tmp_pat
     ("# comment\n\ndevice.main = F0:12:34:56:78:D2\n",         {"main": "F0:12:34:56:78:D2"}),
     ("device.0 = AA:BB:CC:DD:EE:FF\n",                         {"0": "AA:BB:CC:DD:EE:FF"}),
     ("",                                                        {}),
+    ("device.main = F0:12:34:56:78:D2 PLUS2\n",               {"main": "F0:12:34:56:78:D2"}),
 ])
 def test_load_all_devices(m5ctl, monkeypatch, tmp_path, conf_text, expected):
     conf = tmp_path / "m5ctl.conf"
     conf.write_text(conf_text)
     monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
     assert m5ctl._load_all_devices() == expected
+
+
+@pytest.mark.parametrize("conf_text, expected", [
+    ("device.main = F0:12:34:56:78:D2\n",
+     {"main": ("F0:12:34:56:78:D2", None)}),
+    ("device.main = F0:12:34:56:78:D2 PLUS2\n",
+     {"main": ("F0:12:34:56:78:D2", "PLUS2")}),
+    ("device.main = F0:12:34:56:78:D2  spacey \n",
+     {"main": ("F0:12:34:56:78:D2", "spacey")}),
+    ("device.main = F0:12:34:56:78:D2 Plus2 on scope  # powered off\n",
+     {"main": ("F0:12:34:56:78:D2", "Plus2 on scope")}),
+    ("device = AA:BB:CC:DD:EE:FF\n", {}),
+    ("", {}),
+])
+def test_load_device_entries(m5ctl, monkeypatch, tmp_path, conf_text, expected):
+    conf = tmp_path / "m5ctl.conf"
+    conf.write_text(conf_text)
+    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
+    assert m5ctl._load_device_entries() == expected
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +347,39 @@ def test_list_table_output(m5ctl, monkeypatch, capsys, tmp_path):
     assert "reachable" in out
     assert "unreachable" in out
     assert "M5-NexStar-Level" in out
+
+
+def test_list_shows_annotation(m5ctl, monkeypatch, capsys, tmp_path):
+    conf = tmp_path / "m5ctl.conf"
+    conf.write_text("device.main = F0:12:34:56:78:D2 PLUS2\n")
+    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
+    monkeypatch.setattr(m5ctl, "_check_reachable", AsyncMock(return_value={
+        "main": (True, -55, "M5-NexStar-Level"),
+    }))
+
+    m5ctl.cmd_list()
+
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "F0:12:34:56:78:D2" in l]
+    assert lines, "device row not found"
+    assert "| PLUS2" in lines[0]
+    assert lines[0].index("M5-NexStar-Level") < lines[0].index("PLUS2")
+
+
+def test_list_no_annotation_when_absent(m5ctl, monkeypatch, capsys, tmp_path):
+    conf = tmp_path / "m5ctl.conf"
+    conf.write_text("device.main = F0:12:34:56:78:D2\n")
+    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
+    monkeypatch.setattr(m5ctl, "_check_reachable", AsyncMock(return_value={
+        "main": (False, None, None),
+    }))
+
+    m5ctl.cmd_list()
+
+    out = capsys.readouterr().out
+    lines = [l for l in out.splitlines() if "F0:12:34:56:78:D2" in l]
+    assert lines
+    assert lines[0].strip().endswith("(unknown)")
 
 
 # ---------------------------------------------------------------------------

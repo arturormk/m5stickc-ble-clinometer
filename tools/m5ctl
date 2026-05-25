@@ -43,7 +43,7 @@ def _load_device_addr() -> str | None:
         if "=" in line:
             key, _, val = line.partition("=")
             if key.strip() == "device":
-                val = val.strip()
+                val = val.strip().split("#")[0].rstrip()
                 if not val:
                     return None
                 # Raw MAC → use directly; anything else is a name reference.
@@ -53,26 +53,30 @@ def _load_device_addr() -> str | None:
     return None
 
 
-def _load_all_devices() -> dict[str, str]:
-    """Return {name: mac} for all device.NAME entries in the config file."""
+def _load_device_entries() -> dict[str, tuple[str, str | None]]:
+    """Return {name: (mac, annotation)} for all device.NAME entries."""
     conf_file = _get_conf_path()
     if not conf_file.is_file():
         return {}
-    devices: dict[str, str] = {}
+    entries: dict[str, tuple[str, str | None]] = {}
     for raw in conf_file.read_text().splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
+        if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip()
+        key, val = key.strip(), val.strip().split("#")[0].rstrip()
         if key.startswith("device."):
             name = key[len("device."):]
             if name:
-                devices[name] = val
-    return devices
+                mac = val[:17]
+                annotation = val[17:].strip() or None
+                entries[name] = (mac, annotation)
+    return entries
+
+
+def _load_all_devices() -> dict[str, str]:
+    """Return {name: mac} for all device.NAME entries in the config file."""
+    return {name: mac for name, (mac, _) in _load_device_entries().items()}
 
 
 def _resolve_device(selector: str | None) -> str | None:
@@ -111,20 +115,27 @@ async def _check_reachable(
     }
 
 
+def _clr(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if sys.stdout.isatty() else text
+
+
 def cmd_list() -> None:
     conf = _get_conf_path()
-    devices = _load_all_devices()
+    entries = _load_device_entries()
     env = os.environ.get(_ENV_VAR)
 
     print(f"m5ctl {_VERSION}")
     print(f"Config: {conf}")
     print(f"{_ENV_VAR}: {env or '(not set)'}")
 
+    devices = {name: mac for name, (mac, _) in entries.items()}
+
     # Prepend env var device if its MAC isn't already covered by a named entry.
     if env and env not in devices.values():
         devices = {f"${_ENV_VAR}": env} | devices
+        entries = {f"${_ENV_VAR}": (env, None)} | entries
 
-    if not devices:
+    if not entries:
         print("\nNo devices configured.")
         print(f"Set ${_ENV_VAR} or add entries like:  device.main = AA:BB:CC:DD:EE:FF")
         return
@@ -137,14 +148,16 @@ def cmd_list() -> None:
 
     run(go())
 
-    width = max(len(name) for name in devices)
+    key_width = max(len(name) for name in entries)
     print()
-    for name, mac in devices.items():
+    for name, (mac, annotation) in entries.items():
         reachable, rssi, ble_name = reachability.get(name, (False, None, None))
-        status = "reachable  " if reachable else "unreachable"
-        rssi_str = f"{rssi:4d} dBm" if rssi is not None else "    —    "
-        name_str = (ble_name or "(unknown)").ljust(20)
-        print(f"  {name:{width}}  {mac}  {status}  {rssi_str}  {name_str}")
+        status_text = "reachable  " if reachable else "unreachable"
+        status = _clr("32" if reachable else "2;31", status_text)
+        rssi_str = f"{rssi:4d} dBm" if rssi is not None else "    —   "
+        ble_str = (ble_name or "(unknown)").ljust(20)
+        ann_str = f"  {_clr('2', '| ' + annotation)}" if annotation else ""
+        print(f"  {name:{key_width}}  {mac}  {status}  {rssi_str}  {ble_str}{ann_str}")
 
 
 CONNECT_TIMEOUT = 10.0
@@ -253,7 +266,7 @@ async def cmd_scan() -> None:
     for d, adv in pairs:
         name = d.name or "(unknown)"
         rssi = adv.rssi or -999
-        tag = f"  [{known[d.address]}]" if d.address in known else ""
+        tag = f"  {_clr('33;1', f'[{known[d.address]}]')}" if d.address in known else ""
         print(f"  {d.address}  {rssi:4d} dBm  {name}{tag}")
 
 

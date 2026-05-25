@@ -928,12 +928,14 @@ device = F0:24:F9:9B:E2:52
 
 ```ini
 # .m5ctl.conf — gitignored, do not commit
-device.main  = F0:24:F9:9B:E2:52   # telescope mount
-device.guide = 3C:AB:CD:EF:01:56   # guide scope
-device.grey  = 80:EF:AB:CD:12:36   # spare M5Stack Grey
+device.main  = F0:24:F9:9B:E2:52 M5StickC Plus2 on telescope mount
+device.guide = 3C:AB:CD:EF:01:56 M5StickC Plus2 on guide scope
+device.grey  = 80:EF:AB:CD:12:36 M5Stack Grey (spare)   # powered off
 ```
 
 The key after the dot is the name shown in `m5ctl list`. Numeric names (`device.0`, `device.1`) are accepted.
+
+An optional **annotation** can follow the MAC address (separated by whitespace). Everything between the end of the MAC and the first `#` (or end of line) becomes the annotation, trimmed of surrounding whitespace. Annotations are free-form text and may contain spaces. They appear as the last column in `m5ctl list` output and have no effect on device resolution. A `#` starts a comment that runs to the end of the line; it is stripped before the annotation is recorded.
 
 **Setting a default device** — the bare `device` entry is always the fallback when no `-d` flag is given. Its value can be either a raw MAC or the name of a named entry:
 
@@ -945,19 +947,21 @@ device = main          # m5ctl tilt (no -d) uses device.main
 
 With this config, `m5ctl tilt` is equivalent to `m5ctl -d main tilt`, and `m5ctl -d guide tilt` still selects the other device. A bare `device = MAC` (original format) continues to work as before.
 
-`m5ctl list` performs a 1-second BLE scan and shows the reachability, RSSI, and BLE-advertised name for every named entry:
+`m5ctl list` performs a 1-second BLE scan and shows the reachability, RSSI, BLE-advertised name, and annotation (if configured) for every named entry:
 
 ```
 m5ctl 1.0
 Config: /home/user/project/.m5ctl.conf
 M5_BLE_ADDR: (not set)
 
-  main   F0:24:F9:9B:E2:52  reachable    -36 dBm  M5-NexStar-Level    
-  guide  3C:AB:CD:EF:01:56  reachable    -49 dBm  M5-NexStar-Level    
-  grey   80:EF:AB:CD:12:36  unreachable     —      (unknown)           
+  main   F0:24:F9:9B:E2:52  reachable     -36 dBm  M5-NexStar-Level      | M5StickC Plus2 on telescope mount
+  guide  3C:AB:CD:EF:01:56  reachable     -49 dBm  M5-NexStar-Level      | M5StickC Plus2 on guide scope
+  grey   80:EF:AB:CD:12:36  unreachable      —     (unknown)             | M5Stack Grey (spare)
 ```
 
-`m5ctl scan` annotates any discovered device whose MAC appears in the conf file:
+The annotation column is omitted entirely for entries that have no annotation. It is prefixed with `|` to visually separate it from the BLE device name. When output is a terminal, `reachable` is shown in green, `unreachable` in red/dim, and the annotation (including its `|` prefix) in dim gray; plain text when piped.
+
+`m5ctl scan` annotates any discovered device whose MAC appears in the conf file; known devices are shown in yellow/bold when output is a terminal:
 
 ```
   F0:24:F9:9B:E2:52   -36 dBm  M5-NexStar-Level  [main]
@@ -965,7 +969,7 @@ M5_BLE_ADDR: (not set)
   AA:BB:CC:DD:EE:FF   -72 dBm  iPhone
 ```
 
-Lines starting with `#` are ignored. Once the file exists, all `m5ctl` calls pick it up automatically. If none of the sources provides an address, `m5ctl` exits with an error — `scan`, `list`, and `version` are the only subcommands that work without one.
+Once the file exists, all `m5ctl` calls pick it up automatically. If none of the sources provides an address, `m5ctl` exits with an error — `scan`, `list`, and `version` are the only subcommands that work without one.
 
 ### `set-time-now` — set device clock to current host time
 
