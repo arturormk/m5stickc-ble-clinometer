@@ -249,10 +249,10 @@ async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
             pass
 
 
-async def cmd_scan() -> None:
+async def cmd_scan(timeout: float) -> None:
     """Discover nearby BLE peripherals."""
-    print("Scanning for 5 seconds…", file=sys.stderr)
-    results = await BleakScanner.discover(timeout=5.0, return_adv=True)
+    print(f"Scanning for {timeout:g} seconds…", file=sys.stderr)
+    results = await BleakScanner.discover(timeout=timeout, return_adv=True)
     if not results:
         print("No devices found.")
         return
@@ -396,9 +396,8 @@ examples:
   m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
   m5ctl persist-restore    # re-enable and apply last stored values in-session
   m5ctl reboot             # software-reset the device
-  m5ctl help               # list all accepted BLE commands
   m5ctl listen             # print all notifications (events, screen changes…)
-  m5ctl scan               # discover nearby BLE devices
+  m5ctl help               # list all accepted BLE commands
         """,
     )
     parser.add_argument(
@@ -444,7 +443,11 @@ examples:
     p = sub.add_parser("listen",   help="Print all BLE notifications (Ctrl+C to stop)")
     p.add_argument("--stream", type=int, metavar="MS",
                    help="Start tilt streaming at this period (ms) before listening")
-    sub.add_parser("scan",        help="Scan for nearby BLE devices")
+    p = sub.add_parser("scan",    help="Scan for nearby BLE devices")
+    p.add_argument(
+        "--timeout", type=float, default=3.0, metavar="SEC",
+        help="Scanning duration in seconds (default: 3)",
+    )
 
     # --- parameterised commands ---
     p = sub.add_parser("set-time",
@@ -658,7 +661,7 @@ examples:
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
         case "scan":
-            run(cmd_scan())
+            run(cmd_scan(args.timeout))
 
 
 if __name__ == "__main__":

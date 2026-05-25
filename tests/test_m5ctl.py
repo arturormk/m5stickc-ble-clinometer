@@ -405,7 +405,7 @@ async def test_scan_annotates_named_device(m5ctl, monkeypatch, capsys):
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {"main": mac})
     monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
 
-    await m5ctl.cmd_scan()
+    await m5ctl.cmd_scan(3.0)
 
     assert "[main]" in capsys.readouterr().out
 
@@ -418,7 +418,7 @@ async def test_scan_annotates_bare_device(m5ctl, monkeypatch, capsys):
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
     monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: mac)
 
-    await m5ctl.cmd_scan()
+    await m5ctl.cmd_scan(3.0)
 
     assert "[device]" in capsys.readouterr().out
 
@@ -431,9 +431,23 @@ async def test_scan_no_annotation_for_unknown(m5ctl, monkeypatch, capsys):
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
     monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
 
-    await m5ctl.cmd_scan()
+    await m5ctl.cmd_scan(3.0)
 
     assert "[" not in capsys.readouterr().out
+
+
+async def test_scan_passes_timeout_to_discover(m5ctl, monkeypatch, capsys):
+    """--timeout value reaches BleakScanner.discover(timeout=...)."""
+    mac = "AA:BB:CC:DD:EE:FF"
+    scanner = MagicMock()
+    scanner.discover = _fake_discover({mac: _fake_device(mac, "Thing", -80)})
+    monkeypatch.setattr(m5ctl, "BleakScanner", scanner)
+    monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
+    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
+
+    await m5ctl.cmd_scan(1.5)
+
+    scanner.discover.assert_awaited_once_with(timeout=1.5, return_adv=True)
 
 
 # ---------------------------------------------------------------------------

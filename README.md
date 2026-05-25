@@ -826,7 +826,7 @@ options:
 |---|---|---|
 | `version` | | Show m5ctl version (no device required) |
 | `list` | | Scan configured devices for reachability and print a table (1-second scan; no device required) |
-| `scan` | | Scan for nearby BLE devices; annotates devices found in the conf file with their config name |
+| `scan` | `[--timeout SEC]` | Scan for nearby BLE devices; annotates devices found in the conf file with their config name (default 3-second scan) |
 | `help` | | List all accepted BLE commands |
 | `ping` | | Ping the device |
 | `tilt` | | Get current pitch/roll angles |
@@ -961,7 +961,13 @@ M5_BLE_ADDR: (not set)
 
 The annotation column is omitted entirely for entries that have no annotation. It is prefixed with `|` to visually separate it from the BLE device name. When output is a terminal, `reachable` is shown in green, `unreachable` in red/dim, and the annotation (including its `|` prefix) in dim gray; plain text when piped.
 
-`m5ctl scan` annotates any discovered device whose MAC appears in the conf file; known devices are shown in yellow/bold when output is a terminal:
+`m5ctl scan` annotates any discovered device whose MAC appears in the conf file; known devices are shown in yellow/bold when output is a terminal. The scan duration defaults to 3 seconds and can be changed with `--timeout`:
+
+```bash
+m5ctl scan                 # 3-second scan (default)
+m5ctl scan --timeout 1     # quick 1-second scan
+m5ctl scan --timeout 8     # thorough 8-second scan
+```
 
 ```
   F0:24:F9:9B:E2:52   -36 dBm  M5-NexStar-Level  [main]
