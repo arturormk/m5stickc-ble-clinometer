@@ -818,7 +818,7 @@ uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 usage: m5ctl [-h] [-d ADDR_OR_NAME] [-t SEC] COMMAND ...
 
 options:
-  -d ADDR_OR_NAME   Device address or config name. Priority: --device > $M5_BLE_ADDR > conf file
+  -d ADDR_OR_NAME   Device address or config name. Priority: --device > $M5_BLE_ADDR > default_device > first conf entry
   -t SEC            seconds to wait for a response (default: 5)
 ```
 
@@ -900,7 +900,8 @@ The device is resolved from `-d ADDR_OR_NAME` in this order:
 
 1. **Raw MAC** — `--device AA:BB:CC:DD:EE:FF` passes through directly.
 2. **Config name** — `--device main` looks up `device.main` in the conf file; exits with an error if not found.
-3. **No `-d`** — falls back to `M5_BLE_ADDR` environment variable, then the bare `device` entry in the conf file.
+3. **No `-d`, env var set** — uses `M5_BLE_ADDR`.
+4. **No `-d`, no env var** — uses `default_device` from the conf file if present; otherwise uses the first `device.NAME` entry in the conf file.
 
 Config file lookup searches the following locations, stopping at the first match:
 
@@ -921,8 +922,10 @@ Config file lookup searches the following locations, stopping at the first match
 
 ```ini
 # .m5ctl.conf — gitignored, do not commit
-device = F0:24:F9:9B:E2:52
+device.main = F0:24:F9:9B:E2:52
 ```
+
+With a single entry, `m5ctl tilt` (no `-d`) automatically picks it up — no extra config needed.
 
 **Multiple devices** — use `device.NAME` entries (dot notation):
 
@@ -937,24 +940,25 @@ The key after the dot is the name shown in `m5ctl list`. Numeric names (`device.
 
 An optional **annotation** can follow the MAC address (separated by whitespace). Everything between the end of the MAC and the first `#` (or end of line) becomes the annotation, trimmed of surrounding whitespace. Annotations are free-form text and may contain spaces. They appear as the last column in `m5ctl list` output and have no effect on device resolution. A `#` starts a comment that runs to the end of the line; it is stripped before the annotation is recorded.
 
-**Setting a default device** — the bare `device` entry is always the fallback when no `-d` flag is given. Its value can be either a raw MAC or the name of a named entry:
+**Setting a default device** — when no `-d` flag is given, `m5ctl` automatically uses the first `device.NAME` entry in the conf file. To override the file order and designate a specific entry as the default, add a `default_device` key:
 
 ```ini
-device.main  = F0:24:F9:9B:E2:52
-device.guide = 3C:AB:CD:EF:01:56
-device = main          # m5ctl tilt (no -d) uses device.main
+device.main  = F0:24:F9:9B:E2:52 M5StickC Plus2 on telescope mount
+device.guide = 3C:AB:CD:EF:01:56 M5StickC Plus2 on guide scope
+device.grey  = 80:EF:AB:CD:12:36 M5Stack Grey (spare)
+default_device = guide   # m5ctl tilt (no -d) uses device.guide
 ```
 
-With this config, `m5ctl tilt` is equivalent to `m5ctl -d main tilt`, and `m5ctl -d guide tilt` still selects the other device. A bare `device = MAC` (original format) continues to work as before.
+`default_device` must match an existing `device.NAME` key. A warning is printed to stderr if it names an unknown device, and the first entry is used as a fallback. `m5ctl list` marks the active default with a leading `*`.
 
-`m5ctl list` performs a 1-second BLE scan and shows the reachability, RSSI, BLE-advertised name, and annotation (if configured) for every named entry:
+`m5ctl list` performs a 1-second BLE scan and shows the reachability, RSSI, BLE-advertised name, and annotation (if configured) for every named entry. The active default device is marked with a leading `*`:
 
 ```
 m5ctl 1.0
 Config: /home/user/project/.m5ctl.conf
 M5_BLE_ADDR: (not set)
 
-  main   F0:24:F9:9B:E2:52  reachable     -36 dBm  M5-NexStar-Level      | M5StickC Plus2 on telescope mount
+* main   F0:24:F9:9B:E2:52  reachable     -36 dBm  M5-NexStar-Level      | M5StickC Plus2 on telescope mount
   guide  3C:AB:CD:EF:01:56  reachable     -49 dBm  M5-NexStar-Level      | M5StickC Plus2 on guide scope
   grey   80:EF:AB:CD:12:36  unreachable      —     (unknown)             | M5Stack Grey (spare)
 ```

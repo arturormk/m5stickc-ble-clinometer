@@ -161,26 +161,6 @@ def test_handler_iana_name(m5ctl, monkeypatch):
 # _load_all_devices — config file parsing
 # ---------------------------------------------------------------------------
 
-def test_load_device_addr_raw_mac(m5ctl, monkeypatch, tmp_path):
-    conf = tmp_path / "m5ctl.conf"
-    conf.write_text("device = AA:BB:CC:DD:EE:FF\n")
-    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
-    assert m5ctl._load_device_addr() == "AA:BB:CC:DD:EE:FF"
-
-
-def test_load_device_addr_name_alias(m5ctl, monkeypatch, tmp_path):
-    conf = tmp_path / "m5ctl.conf"
-    conf.write_text("device.main = F0:12:34:56:78:D2\ndevice = main\n")
-    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
-    assert m5ctl._load_device_addr() == "F0:12:34:56:78:D2"
-
-
-def test_load_device_addr_unknown_alias_returns_none(m5ctl, monkeypatch, tmp_path):
-    conf = tmp_path / "m5ctl.conf"
-    conf.write_text("device = notfound\n")
-    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
-    assert m5ctl._load_device_addr() is None
-
 
 @pytest.mark.parametrize("conf_text, expected", [
     ("device = AA:BB:CC:DD:EE:FF\n",                          {}),
@@ -207,15 +187,19 @@ def test_load_all_devices(m5ctl, monkeypatch, tmp_path, conf_text, expected):
 
 @pytest.mark.parametrize("conf_text, expected", [
     ("device.main = F0:12:34:56:78:D2\n",
-     {"main": ("F0:12:34:56:78:D2", None)}),
+     ({"main": ("F0:12:34:56:78:D2", None)}, None)),
     ("device.main = F0:12:34:56:78:D2 PLUS2\n",
-     {"main": ("F0:12:34:56:78:D2", "PLUS2")}),
+     ({"main": ("F0:12:34:56:78:D2", "PLUS2")}, None)),
     ("device.main = F0:12:34:56:78:D2  spacey \n",
-     {"main": ("F0:12:34:56:78:D2", "spacey")}),
+     ({"main": ("F0:12:34:56:78:D2", "spacey")}, None)),
     ("device.main = F0:12:34:56:78:D2 Plus2 on scope  # powered off\n",
-     {"main": ("F0:12:34:56:78:D2", "Plus2 on scope")}),
-    ("device = AA:BB:CC:DD:EE:FF\n", {}),
-    ("", {}),
+     ({"main": ("F0:12:34:56:78:D2", "Plus2 on scope")}, None)),
+    ("device = AA:BB:CC:DD:EE:FF\n", ({}, None)),
+    ("", ({}, None)),
+    ("device.main = F0:12:34:56:78:D2\ndefault_device = main\n",
+     ({"main": ("F0:12:34:56:78:D2", None)}, "main")),
+    ("default_device = main\n",
+     ({}, "main")),
 ])
 def test_load_device_entries(m5ctl, monkeypatch, tmp_path, conf_text, expected):
     conf = tmp_path / "m5ctl.conf"
@@ -251,20 +235,44 @@ def test_resolve_unknown_name_exits(m5ctl, monkeypatch):
 
 def test_resolve_none_uses_env_var(m5ctl, monkeypatch):
     monkeypatch.setenv(_ENV_VAR, OTHER_MAC)
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
+    monkeypatch.setattr(m5ctl, "_load_device_entries", lambda: ({}, None))
     assert m5ctl._resolve_device(None) == OTHER_MAC
 
 
-def test_resolve_none_uses_conf_fallback(m5ctl, monkeypatch):
+def test_resolve_none_uses_first_device_fallback(m5ctl, monkeypatch):
     monkeypatch.delenv(_ENV_VAR, raising=False)
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: MAC)
+    monkeypatch.setattr(m5ctl, "_load_device_entries",
+                        lambda: ({"main": (MAC, None)}, None))
     assert m5ctl._resolve_device(None) == MAC
 
 
 def test_resolve_none_returns_none_when_nothing_configured(m5ctl, monkeypatch):
     monkeypatch.delenv(_ENV_VAR, raising=False)
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
+    monkeypatch.setattr(m5ctl, "_load_device_entries", lambda: ({}, None))
     assert m5ctl._resolve_device(None) is None
+
+
+def test_resolve_default_device(m5ctl, monkeypatch):
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setattr(m5ctl, "_load_device_entries",
+                        lambda: ({"main": (MAC, None)}, "main"))
+    assert m5ctl._resolve_device(None) == MAC
+
+
+def test_resolve_env_var_beats_default_device(m5ctl, monkeypatch):
+    monkeypatch.setenv(_ENV_VAR, OTHER_MAC)
+    monkeypatch.setattr(m5ctl, "_load_device_entries",
+                        lambda: ({"main": (MAC, None)}, "main"))
+    assert m5ctl._resolve_device(None) == OTHER_MAC
+
+
+def test_resolve_default_device_unknown_warns_and_falls_through(m5ctl, monkeypatch, capsys):
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setattr(m5ctl, "_load_device_entries",
+                        lambda: ({"main": (MAC, None)}, "typo"))
+    result = m5ctl._resolve_device(None)
+    assert result == MAC
+    assert "warning" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +390,29 @@ def test_list_no_annotation_when_absent(m5ctl, monkeypatch, capsys, tmp_path):
     assert lines[0].strip().endswith("(unknown)")
 
 
+def test_list_marks_default_device(m5ctl, monkeypatch, capsys, tmp_path):
+    conf = tmp_path / "m5ctl.conf"
+    conf.write_text(
+        "device.main  = F0:12:34:56:78:D2\n"
+        "device.guide = 3C:AB:CD:EF:01:56\n"
+        "default_device = main\n"
+    )
+    monkeypatch.setattr(m5ctl, "_get_conf_path", lambda: conf)
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setattr(m5ctl, "_check_reachable", AsyncMock(return_value={
+        "main":  (True,  -55, "M5-NexStar-Level"),
+        "guide": (False, None, None),
+    }))
+
+    m5ctl.cmd_list()
+
+    out = capsys.readouterr().out
+    main_lines  = [l for l in out.splitlines() if "F0:12:34:56:78:D2" in l]
+    guide_lines = [l for l in out.splitlines() if "3C:AB:CD:EF:01:56" in l]
+    assert main_lines  and main_lines[0].startswith("*")
+    assert guide_lines and guide_lines[0].startswith(" ")
+
+
 # ---------------------------------------------------------------------------
 # cmd_scan — annotation of known devices
 # ---------------------------------------------------------------------------
@@ -403,24 +434,10 @@ async def test_scan_annotates_named_device(m5ctl, monkeypatch, capsys):
     scanner.discover = _fake_discover({mac: _fake_device(mac, "M5-NexStar-Level", -55)})
     monkeypatch.setattr(m5ctl, "BleakScanner", scanner)
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {"main": mac})
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
 
     await m5ctl.cmd_scan(3.0)
 
     assert "[main]" in capsys.readouterr().out
-
-
-async def test_scan_annotates_bare_device(m5ctl, monkeypatch, capsys):
-    mac = "AA:BB:CC:DD:EE:FF"
-    scanner = MagicMock()
-    scanner.discover = _fake_discover({mac: _fake_device(mac, "M5-NexStar-Level", -60)})
-    monkeypatch.setattr(m5ctl, "BleakScanner", scanner)
-    monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: mac)
-
-    await m5ctl.cmd_scan(3.0)
-
-    assert "[device]" in capsys.readouterr().out
 
 
 async def test_scan_no_annotation_for_unknown(m5ctl, monkeypatch, capsys):
@@ -429,7 +446,6 @@ async def test_scan_no_annotation_for_unknown(m5ctl, monkeypatch, capsys):
     scanner.discover = _fake_discover({mac: _fake_device(mac, "iPhone", -70)})
     monkeypatch.setattr(m5ctl, "BleakScanner", scanner)
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
 
     await m5ctl.cmd_scan(3.0)
 
@@ -443,7 +459,6 @@ async def test_scan_passes_timeout_to_discover(m5ctl, monkeypatch, capsys):
     scanner.discover = _fake_discover({mac: _fake_device(mac, "Thing", -80)})
     monkeypatch.setattr(m5ctl, "BleakScanner", scanner)
     monkeypatch.setattr(m5ctl, "_load_all_devices", lambda: {})
-    monkeypatch.setattr(m5ctl, "_load_device_addr", lambda: None)
 
     await m5ctl.cmd_scan(1.5)
 
