@@ -26,7 +26,7 @@ def _get_conf_path() -> pathlib.Path:
         project_root = pathlib.Path(__file__).resolve().parent.parent / ".m5ctl.conf"
         if project_root.is_file():
             return project_root
-        tools_local = pathlib.Path(__file__).resolve().parent / "m5ctl.conf"
+        tools_local = pathlib.Path(__file__).resolve().parent.parent / "m5ctl.conf"
         if tools_local.is_file():
             return tools_local
     return pathlib.Path.home() / ".m5ctl.conf"

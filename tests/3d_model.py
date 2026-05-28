@@ -2,9 +2,11 @@
 """Real-time 3D visualizer for the M5Stack BLE clinometer.
 
 Usage:
-    python tests/3d_model.py                          # demo mode (animated)
-    python tests/3d_model.py --device AA:BB:CC:DD:EE:FF
-    python tests/3d_model.py --device AA:BB:CC:DD:EE:FF --model 2
+    python tests/3d_model.py                   # auto-connect from conf, or interactive scan
+    python tests/3d_model.py -d main           # connect by config name (device.main in conf)
+    python tests/3d_model.py -d AA:BB:CC:DD:EE:FF  # connect by raw MAC
+    python tests/3d_model.py --sim             # animated demo, no BLE
+    python tests/3d_model.py -d main --model 2
 
 Keys: 1/2/3 switch device model, Q/Esc quit.
 """
@@ -14,6 +16,7 @@ import asyncio
 import math
 import os
 import pathlib
+import sys
 import threading
 from dataclasses import dataclass, field
 
@@ -45,20 +48,75 @@ CMD_UUID      = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
 RESP_UUID     = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
 STREAM_MS     = 100   # firmware minimum is 100 ms → ~10 Hz
 
-_CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
+def _get_conf_path() -> pathlib.Path:
+    if getattr(sys, 'frozen', False):
+        local = pathlib.Path(sys.executable).parent / "m5ctl.conf"
+        if local.is_file():
+            return local
+    else:
+        project_root = pathlib.Path(__file__).resolve().parent.parent
+        hidden = project_root / ".m5ctl.conf"
+        if hidden.is_file():
+            return hidden
+        nondot = project_root / "m5ctl.conf"
+        if nondot.is_file():
+            return nondot
+    return pathlib.Path.home() / ".m5ctl.conf"
 
 
-def _load_conf_addr() -> str | None:
-    if not _CONF_FILE.is_file():
-        return None
-    for raw in _CONF_FILE.read_text().splitlines():
+def _load_device_entries() -> tuple[dict[str, tuple[str, str | None]], str | None]:
+    """Return (entries, default_name).
+
+    entries      — {name: (mac, annotation)} for all device.NAME keys
+    default_name — value of default_device key, or None
+    """
+    conf_file = _get_conf_path()
+    if not conf_file.is_file():
+        return {}, None
+    entries: dict[str, tuple[str, str | None]] = {}
+    default_name: str | None = None
+    for raw in conf_file.read_text().splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        if "=" in line:
-            key, _, val = line.partition("=")
-            if key.strip() == "device":
-                return val.strip() or None
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip().split("#")[0].rstrip()
+        if key.startswith("device."):
+            name = key[len("device."):]
+            if name:
+                mac = val[:17]
+                annotation = val[17:].strip() or None
+                entries[name] = (mac, annotation)
+        elif key == "default_device":
+            default_name = val or None
+    return entries, default_name
+
+
+def _resolve_device(selector: str | None) -> str | None:
+    if selector is not None:
+        if len(selector) == 17 and selector.count(":") == 5:
+            return selector
+        entries, _ = _load_device_entries()
+        devices = {name: mac for name, (mac, _) in entries.items()}
+        if selector in devices:
+            return devices[selector]
+        print(f"error: device {selector!r} not found in config.", file=sys.stderr)
+        return None
+
+    env = os.environ.get("M5_BLE_ADDR")
+    if env:
+        return env
+
+    entries, default_name = _load_device_entries()
+    if default_name:
+        devices = {name: mac for name, (mac, _) in entries.items()}
+        if default_name in devices:
+            return devices[default_name]
+        print(f"warning: default_device {default_name!r} not found in config — ignored",
+              file=sys.stderr)
+
+    if entries:
+        return next(iter(entries.values()))[0]
     return None
 
 # ── Device models ──────────────────────────────────────────────────────────────
@@ -412,8 +470,6 @@ class Renderer:
 
 def _scan_and_pick() -> str | None:
     """Scan for BLE devices, print a numbered list, return the chosen address."""
-    import sys
-
     async def _do_scan():
         print("Scanning for 5 seconds…", flush=True)
         results = await BleakScanner.discover(timeout=5.0, return_adv=True)
@@ -446,8 +502,10 @@ def main() -> None:
         description="3D orientation visualizer for M5Stack BLE clinometer"
     )
     parser.add_argument(
-        "--device", default=None, metavar="ADDR",
-        help="BLE address to connect (env M5_BLE_ADDR or .m5ctl.conf also work; omit to scan)",
+        "-d", "--device",
+        default=None,
+        metavar="ADDR_OR_NAME",
+        help="BLE address or config name (e.g. 'main'). Names are listed by 'm5ctl list'.",
     )
     parser.add_argument(
         "--sim", action="store_true",
@@ -459,17 +517,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    import sys
     demo_mode   = args.sim
     device_addr = None
 
     if not demo_mode:
-        device_addr = args.device or os.environ.get("M5_BLE_ADDR") or _load_conf_addr()
-        if device_addr is None:
+        device_addr = _resolve_device(args.device)
+        if not device_addr:
+            print("No device configured. Starting interactive scan…")
             device_addr = _scan_and_pick()
-            if device_addr is None:
-                print("No device selected.", file=sys.stderr)
-                return
+        if not device_addr:
+            print("No device selected.", file=sys.stderr)
+            return
 
     state  = TiltState()
     worker: BleWorker | None = None

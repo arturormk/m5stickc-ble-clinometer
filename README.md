@@ -905,12 +905,14 @@ The device is resolved from `-d ADDR_OR_NAME` in this order:
 
 Config file lookup searches the following locations, stopping at the first match:
 
-   **Running from Python source (`uv run tools/m5ctl …`):**
+   **Running from Python source (`uv run tools/m5ctl …` or `uv run python tests/3d_model.py …`):**
    | Location | Filename | Notes |
    |---|---|---|
-   | Project root | `.m5ctl.conf` | Original location — backward compatible |
-   | `tools/` directory | `m5ctl.conf` | Alternative for scripts that run from the tools directory |
+   | Project root | `.m5ctl.conf` | Standard location (gitignored hidden file) |
+   | Project root | `m5ctl.conf` | Windows-friendly alternative — no leading dot; also gitignored |
    | Home directory | `~/.m5ctl.conf` | Per-user fallback |
+
+   Both `tools/m5ctl` and `tests/3d_model.py` use this same search order, so a single conf file at the project root is shared by both tools.
 
    **Running as a PyInstaller frozen executable (`m5ctl.exe …`):**
    | Location | Filename | Notes |
@@ -1025,13 +1027,17 @@ uv run tools/m5ctl set-timezone LST                   # sidereal mode
 uv sync --group tools
 ```
 
-**Three operating modes:**
+It reads the same conf file as `m5ctl`, resolves device names and the `default_device` key with identical logic, and accepts `-d` (short form of `--device`) with an `ADDR_OR_NAME` argument — pass a raw MAC or a config name listed by `m5ctl list`. When no device is configured or found, it falls back to an interactive BLE scan instead of exiting with an error.
 
-| Mode | Command | Description |
+**Operating modes:**
+
+| Mode | How triggered | Description |
 |---|---|---|
-| Scan | `uv run --group tools python tests/3d_model.py` | Scans for BLE devices, shows a numbered list, prompts for selection |
-| Direct | `uv run --group tools python tests/3d_model.py --device F0:24:F9:9B:E2:52` | Connects directly to the given address |
-| Simulator | `uv run --group tools python tests/3d_model.py --sim` | Animated demo — no BLE required |
+| Config | No `-d`; conf file has `default_device` or any `device.NAME` entry | Connects automatically to the configured default (or first entry) |
+| Named | `-d main` | Resolves `main` to its MAC via `device.main` in the conf file |
+| Direct | `-d F0:24:F9:9B:E2:52` | Connects directly to the given raw MAC address |
+| Scan | No `-d`; no conf entry found | Scans for BLE devices, shows a numbered list, prompts for selection |
+| Simulator | `--sim` | Animated demo — no BLE required |
 
 **Keyboard controls:**
 
