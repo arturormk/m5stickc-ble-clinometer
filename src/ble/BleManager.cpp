@@ -116,6 +116,26 @@ static uint8_t parseMsgButtons(const char* token) {
     return mask;
 }
 
+// Map "+X"/"-X"/"+Y"/"-Y" → signed axis code; returns false on bad input.
+static bool parseAxisToken(const char* tok, int8_t& out) {
+    if (!tok || strlen(tok) != 2) return false;
+    int8_t sign = (tok[0] == '+') ? +1 : (tok[0] == '-') ? -1 : 0;
+    if (!sign) return false;
+    if (tok[1] == 'X' || tok[1] == 'x') { out = (int8_t)(sign * 1); return true; }
+    if (tok[1] == 'Y' || tok[1] == 'y') { out = (int8_t)(sign * 2); return true; }
+    return false;
+}
+
+static const char* axisCodeStr(int8_t c) {
+    switch (c) {
+        case  1: return "+X";
+        case -1: return "-X";
+        case  2: return "+Y";
+        case -2: return "-Y";
+        default: return "??";
+    }
+}
+
 // Build "YYYY-MM-DDTHH:MM:SSZ" from epoch
 static void formatIso8601(time_t t, char* buf, size_t len) {
     struct tm ti;
@@ -237,6 +257,8 @@ static const char* const kHelpLines[] = {
     "START_STREAM <ms>",
     "STOP_STREAM",
     "SET_NIGHT_MODE ON|OFF",
+    "GET_PITCHROLL",
+    "SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y",
     "BEEP [<notes...>]",
     "PERSIST [CLEAR|RESTORE|READ]",
     "REBOOT",
@@ -297,6 +319,10 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "GET_TILT") == 0) {
             snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f %.2f",
                      s_state->pitchDeg, s_state->rollDeg, s_state->accMag);
+
+        } else if (strcasecmp(tok, "GET_PITCHROLL") == 0) {
+            snprintf(resp, sizeof(resp), "PITCHROLL %s,%s",
+                     axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
 
         } else if (strcasecmp(tok, "GET_STATUS") == 0) {
             buildStatusLine(*s_state, resp, sizeof(resp));
@@ -601,6 +627,26 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
             }
 
+        } else if (strcasecmp(tok, "SET_PITCHROLL") == 0) {
+            // Argument format: "<pitchAxis>,<rollAxis>"  e.g. "+X,-Y"
+            char* arg = strtok_r(nullptr, " ", &saveptr);
+            if (!arg) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            // Split on comma
+            char* comma = strchr(arg, ',');
+            if (!comma) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+            *comma = '\0';
+            const char* pitchTok = arg;
+            const char* rollTok  = comma + 1;
+            int8_t pa, ra;
+            if (!parseAxisToken(pitchTok, pa) || !parseAxisToken(rollTok, ra)) {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                goto respond;
+            }
+            s_state->pitchAxis = pa;
+            s_state->rollAxis  = ra;
+            snprintf(resp, sizeof(resp), "OK PITCHROLL %s,%s",
+                     axisCodeStr(pa), axisCodeStr(ra));
+
         } else if (strcasecmp(tok, "BEEP") == 0) {
             char* arg = strtok_r(nullptr, "", &saveptr);
             while (arg && *arg == ' ') arg++;
@@ -660,9 +706,11 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 char lonBuf[16];
                 if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
                 else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
-                snprintf(resp, sizeof(resp), "OK RESTORED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f",
+                snprintf(resp, sizeof(resp),
+                         "OK RESTORED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
                          s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz);
+                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
+                         axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
             } else {
                 float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
                 if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
@@ -670,9 +718,11 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
                 char lonBuf[16];
                 if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
                 else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
-                snprintf(resp, sizeof(resp), "OK PERSISTED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f",
+                snprintf(resp, sizeof(resp),
+                         "OK PERSISTED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
                          s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz);
+                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
+                         axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
             }
 
         } else if (strcasecmp(tok, "REBOOT") == 0) {

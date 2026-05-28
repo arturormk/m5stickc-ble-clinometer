@@ -12,8 +12,10 @@ private:
     LGFX_Sprite* _sprite = nullptr;
     uint32_t     _lastRefreshMs = 0;
     int          _W = 0, _H = 0;   // screen dimensions, set in begin()
-    float        _dispPitch = 0.0f;   // display-smoothed pitch, clinometer only
-    float        _dispRoll  = 0.0f;   // display-smoothed roll,  clinometer only
+    float        _dispPitch   = 0.0f;  // display-smoothed configured pitch
+    float        _dispRoll    = 0.0f;  // display-smoothed configured roll
+    float        _dispUxPitch = 0.0f;  // display-smoothed standard UX pitch (for bubble)
+    float        _dispUxRoll  = 0.0f;  // display-smoothed standard UX roll  (for bubble)
 
     void _drawClinometer(const DeviceState& state);
     void _drawTime(const DeviceState& state);

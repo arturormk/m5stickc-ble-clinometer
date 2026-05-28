@@ -1138,6 +1138,107 @@ async def test_calibrate_two_args_rejected(device_addr):
 
 
 # ---------------------------------------------------------------------------
+# GET_PITCHROLL / SET_PITCHROLL
+# ---------------------------------------------------------------------------
+
+_VALID_AXES = {"+X", "-X", "+Y", "-Y"}
+
+
+@pytest.mark.asyncio
+async def test_get_pitchroll_format(device_addr):
+    """GET_PITCHROLL returns PITCHROLL <pitch>,<roll> with valid axis codes."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("GET_PITCHROLL")
+    assert resp.startswith("PITCHROLL ")
+    _, axes = resp.split(None, 1)
+    parts = axes.split(",")
+    assert len(parts) == 2, f"expected 2 comma-separated axes, got: {axes!r}"
+    assert parts[0] in _VALID_AXES, f"unexpected pitch axis: {parts[0]!r}"
+    assert parts[1] in _VALID_AXES, f"unexpected roll axis: {parts[1]!r}"
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_roundtrip(device_addr):
+    """SET_PITCHROLL changes the axis assignment; GET_PITCHROLL confirms it."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_PITCHROLL -X,+Y")
+        assert resp == "OK PITCHROLL -X,+Y"
+        resp = await s.send("GET_PITCHROLL")
+        assert resp == "PITCHROLL -X,+Y"
+        await s.send("SET_PITCHROLL +X,+Y")   # restore default
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_default(device_addr):
+    """SET_PITCHROLL +X,+Y restores the default assignment."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_PITCHROLL -X,-Y")   # change to something non-default
+        resp = await s.send("SET_PITCHROLL +X,+Y")
+    assert resp == "OK PITCHROLL +X,+Y"
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_all_combinations(device_addr):
+    """SET_PITCHROLL accepts every combination of the four axis codes."""
+    async with BleSession(device_addr) as s:
+        for pitch in _VALID_AXES:
+            for roll in _VALID_AXES:
+                resp = await s.send(f"SET_PITCHROLL {pitch},{roll}")
+                assert resp == f"OK PITCHROLL {pitch},{roll}", \
+                    f"unexpected response for {pitch},{roll}: {resp!r}"
+        await s.send("SET_PITCHROLL +X,+Y")   # restore default
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_case_insensitive(device_addr):
+    """SET_PITCHROLL accepts lowercase axis names."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_PITCHROLL +x,+y")
+    assert resp == "OK PITCHROLL +X,+Y"
+    async with BleSession(device_addr) as s:
+        await s.send("SET_PITCHROLL +X,+Y")   # restore default
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_missing_roll(device_addr):
+    """SET_PITCHROLL with only one axis is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_PITCHROLL +X")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_invalid_axis(device_addr):
+    """SET_PITCHROLL with an unrecognised axis code is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_PITCHROLL +Z,+Y")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_no_args(device_addr):
+    """SET_PITCHROLL with no arguments is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_PITCHROLL")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_pitchroll_affects_tilt(device_addr):
+    """After SET_PITCHROLL +X,-Y, GET_TILT still returns a valid TILT line."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_PITCHROLL +X,-Y")
+        resp = await s.send("GET_TILT")
+        await s.send("SET_PITCHROLL +X,+Y")   # restore default
+    assert resp.startswith("TILT ")
+    parts = resp.split()
+    assert len(parts) == 4
+    float(parts[1])  # pitch degrees — must be numeric
+    float(parts[2])  # roll degrees
+    float(parts[3])  # gravity magnitude
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 

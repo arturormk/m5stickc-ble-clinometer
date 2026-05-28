@@ -383,9 +383,13 @@ examples:
   m5ctl listen --stream 500   # stream tilt every 500 ms and print notifications
   m5ctl night-mode on      # enable red-only night mode
   m5ctl night-mode off     # restore normal colors
+  m5ctl get-pitchroll                   # show current pitch/roll axis assignment
+  m5ctl set-pitchroll +X,+Y            # default: pitch=+X (top rises), roll=+Y (right backward rises)
+  m5ctl set-pitchroll ~X,+Y            # pitch=-X  (use ~ for negative to avoid flag conflict)
+  m5ctl set-pitchroll +X,-Y            # flip roll sign
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
-  m5ctl persist            # save current tz, longitude, calibration to NVS
+  m5ctl persist            # save current tz, longitude, calibration and pitchroll to NVS
   m5ctl persist-read       # show stored NVS values (valid flag + all keys)
   m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
   m5ctl persist-restore    # re-enable and apply last stored values in-session
@@ -504,7 +508,30 @@ examples:
     p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
     p.add_argument("state", choices=["on", "off"], help="on or off")
 
-    sub.add_parser("persist",         help="Save current tz, timezone offset, longitude and calibration to NVS")
+    sub.add_parser("get-pitchroll", help="Show current pitch/roll axis assignment")
+    p = sub.add_parser(
+        "set-pitchroll",
+        help="Set pitch and roll axis assignment (e.g. +X,-Y)",
+        description=(
+            "Assign a signed UX axis to pitch and roll.\n\n"
+            "Axes: +X  -X  +Y  -Y\n"
+            "  +X  top of screen rises = positive pitch (default pitch)\n"
+            "  +Y  right side rises toward viewer = positive roll (default roll)\n\n"
+            "Use ~ instead of - for negative axes to avoid shell/argparse flag conflict\n"
+            "(e.g. ~X,-Y instead of -X,-Y when pitch is negative)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "axes",
+        metavar="PITCH,ROLL",
+        help=(
+            "Comma-separated axis pair, e.g. +X,-Y or ~X,+Y. "
+            "Each axis is one of: +X -X +Y -Y (use ~ for - to avoid argparse flag conflicts)."
+        ),
+    )
+
+    sub.add_parser("persist",         help="Save current tz, timezone offset, longitude, calibration and pitchroll to NVS")
     sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
     sub.add_parser("persist-clear",   help="Invalidate stored values with a single NVS write")
     sub.add_parser("persist-restore", help="Re-enable and apply last stored NVS values in-session")
@@ -519,16 +546,22 @@ examples:
                         "Octave: ' up, , down from middle C. "
                         "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
 
-    # argparse treats -HH:MM as an unknown flag because it starts with '-'.
-    # Rewrite it to ~HH:MM so the positional is accepted; the handler converts
-    # it back to -HH:MM before sending to firmware.
-    # argparse treats -HH:MM as an unknown flag because it starts with '-'.
-    # Rewrite it to ~HH:MM so the positional is accepted; the handler converts
-    # it back to -HH:MM before sending to firmware.
+    # argparse treats tokens starting with '-' as flags.
+    # For set-timezone: rewrite -HH:MM → ~HH:MM; handler converts back.
+    # For set-pitchroll: rewrite -X,-Y (etc.) → ~X,-Y when the axes arg starts with '-'.
     _argv = sys.argv[1:]
     try:
         _i = _argv.index("set-timezone")
         if _i + 1 < len(_argv) and re.fullmatch(r'-\d\d:\d\d', _argv[_i + 1]):
+            _argv = list(_argv)
+            _argv[_i + 1] = '~' + _argv[_i + 1][1:]
+    except ValueError:
+        pass
+    try:
+        _i = _argv.index("set-pitchroll")
+        # Rewrite -X or -Y (leading negative axis) to ~X / ~Y so argparse does not
+        # mistake it for an option flag. Only matches actual axis specs, not -h/--help.
+        if _i + 1 < len(_argv) and re.fullmatch(r'-[XYxy](,[+\-~XYxy]+)?', _argv[_i + 1]):
             _argv = list(_argv)
             _argv[_i + 1] = '~' + _argv[_i + 1][1:]
     except ValueError:
@@ -639,6 +672,21 @@ examples:
             do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {args.text}")
         case "night-mode":
             do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
+        case "get-pitchroll":
+            do_send(args, "GET_PITCHROLL")
+        case "set-pitchroll":
+            axes = args.axes.replace('~', '-').upper()
+            parts = axes.split(',')
+            valid = {'+X', '-X', '+Y', '-Y'}
+            if len(parts) != 2 or parts[0] not in valid or parts[1] not in valid:
+                print(
+                    f"error: axes must be PITCH,ROLL where each is one of: +X  -X  +Y  -Y\n"
+                    f"  e.g.:  m5ctl set-pitchroll +X,-Y\n"
+                    f"  Use ~ instead of - for negative pitch: m5ctl set-pitchroll ~X,-Y",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            do_send(args, f"SET_PITCHROLL {parts[0]},{parts[1]}")
         case "beep":
             cmd = "BEEP " + " ".join(args.notes) if args.notes else "BEEP"
             do_send(args, cmd)

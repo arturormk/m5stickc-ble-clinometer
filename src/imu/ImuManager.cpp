@@ -59,30 +59,39 @@ void ImuManager::update(DeviceState& state) {
     float gcx, gcy, gcz;
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
 
-    // ADR 0002: map raw IMU components into a common UX frame, then apply
-    // the project's pitch / roll convention:
+    // ADR 0002: map raw IMU components into a common UX frame.
     //
     //   UX +X = screen right,  UX +Y = screen up,  UX +Z = out of screen
-    //   reported_pitch = + rotation_about(UX +X)  →  top of screen rises
-    //   reported_roll  = - rotation_about(UX +Y)  →  right side of screen rises
     //
     // M5StickC Plus / Plus2 (landscape, M5 button left):
     //   UX +X = IMU +Y,  UX +Y = IMU -X,  UX +Z = IMU +Z
-    //   pitch = +rotation_about(IMU +Y) = atan2(-gcx, gcz)
-    //   roll  = -rotation_about(IMU -X) = +rotation_about(IMU +X) = atan2(gcy, gcz)
     //
     // Core2 / CoreS3 (screen axes align with IMU axes):
     //   UX +X = IMU +X,  UX +Y = IMU +Y,  UX +Z = IMU +Z
-    //   pitch = +rotation_about(IMU +X) = atan2(gcy, gcz)
-    //   roll  = -rotation_about(IMU +Y) = atan2(-gcx, gcz)
-    if (M5.getBoard() == m5::board_t::board_M5StickCPlus2
-            || M5.getBoard() == m5::board_t::board_M5StickCPlus) {
-        state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
-        state.rollDeg  = atan2f( gcy, gcz) * 57.2957795f;
-    } else {
-        state.pitchDeg = atan2f( gcy, gcz) * 57.2957795f;
-        state.rollDeg  = atan2f(-gcx, gcz) * 57.2957795f;
-    }
+    bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+                  || M5.getBoard() == m5::board_t::board_M5StickCPlus);
+    float gux = isStickC ?  gcy : gcx;   // UX X component (screen right)
+    float guy = isStickC ? -gcx : gcy;   // UX Y component (screen up)
+    float guz = gcz;                     // UX Z component (out of screen)
+
+    // Standard UX tilt angles preserved for bubble display (device-specific, unchanged).
+    // StickC: uxRoll = atan2(gux,guz); Core2: uxRoll = atan2(-gux,guz)
+    state.uxPitchDeg = atan2f(guy, guz) * 57.2957795f;
+    state.uxRollDeg  = atan2f(isStickC ? gux : -gux, guz) * 57.2957795f;
+
+    // Configured pitch/roll angles (user-settable via SET_PITCHROLL, default +X/-Y).
+    // Axis codes: +1=+X, -1=-X, +2=+Y, -2=-Y
+    auto tilt = [&](int8_t code) -> float {
+        switch (code) {
+            case  1: return atan2f( guy,  guz);  // +X: top rises = positive
+            case -1: return atan2f(-guy,  guz);  // -X
+            case  2: return atan2f(-gux,  guz);  // +Y
+            case -2: return atan2f( gux,  guz);  // -Y: right rises = positive
+            default: return 0.0f;
+        }
+    };
+    state.pitchDeg = tilt(state.pitchAxis) * 57.2957795f;
+    state.rollDeg  = tilt(state.rollAxis)  * 57.2957795f;
 
     state.tiltTimestampMs = now;
 }

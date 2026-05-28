@@ -48,25 +48,71 @@ static void fmtAngle(char* buf, size_t sz, float deg) {
 
 // --- Screen renderers ---
 
+// ↕ icon: horizontal pivot bar + vertical double-arrow
+static void _drawVertIcon(LGFX_Sprite* spr, int cx, int cy, uint16_t col) {
+    spr->drawLine(cx - 7, cy,     cx + 7, cy,     col);
+    spr->drawLine(cx,     cy - 1, cx,     cy - 5, col);
+    spr->drawLine(cx,     cy - 7, cx - 3, cy - 4, col);
+    spr->drawLine(cx,     cy - 7, cx + 3, cy - 4, col);
+    spr->drawLine(cx,     cy + 1, cx,     cy + 5, col);
+    spr->drawLine(cx,     cy + 7, cx - 3, cy + 4, col);
+    spr->drawLine(cx,     cy + 7, cx + 3, cy + 4, col);
+}
+
+// ↔ icon: vertical pivot bar + horizontal double-arrow
+static void _drawHorizIcon(LGFX_Sprite* spr, int cx, int cy, uint16_t col) {
+    spr->drawLine(cx,     cy - 7, cx,     cy + 7, col);
+    spr->drawLine(cx - 1, cy,     cx - 5, cy,     col);
+    spr->drawLine(cx - 7, cy,     cx - 4, cy - 3, col);
+    spr->drawLine(cx - 7, cy,     cx - 4, cy + 3, col);
+    spr->drawLine(cx + 1, cy,     cx + 5, cy,     col);
+    spr->drawLine(cx + 7, cy,     cx + 4, cy - 3, col);
+    spr->drawLine(cx + 7, cy,     cx + 4, cy + 3, col);
+}
+
 void Display::_drawClinometer(const DeviceState& state) {
     bool n = state.nightMode;
 
     static constexpr float DISP_ALPHA = 0.3f;
-    _dispPitch = DISP_ALPHA * state.pitchDeg + (1.0f - DISP_ALPHA) * _dispPitch;
-    _dispRoll  = DISP_ALPHA * state.rollDeg  + (1.0f - DISP_ALPHA) * _dispRoll;
+    _dispPitch   = DISP_ALPHA * state.pitchDeg   + (1.0f - DISP_ALPHA) * _dispPitch;
+    _dispRoll    = DISP_ALPHA * state.rollDeg    + (1.0f - DISP_ALPHA) * _dispRoll;
+    _dispUxPitch = DISP_ALPHA * state.uxPitchDeg + (1.0f - DISP_ALPHA) * _dispUxPitch;
+    _dispUxRoll  = DISP_ALPHA * state.uxRollDeg  + (1.0f - DISP_ALPHA) * _dispUxRoll;
 
     int cx   = _W / 3;
     int cy   = _H / 2;
     int maxR = (cx < cy ? cx : cy) - 12;
 
-    // Crosshairs — colour-matched to the Pitch (cyan) and Roll (orange) labels
-    _sprite->drawLine(cx, cy - maxR, cx, cy + maxR, _c(TFT_CYAN,   n)); // vertical   = Pitch axis
-    _sprite->drawLine(cx - maxR, cy, cx + maxR, cy, _c(TFT_ORANGE, n)); // horizontal = Roll axis
-    // Arrowheads indicating positive direction (pitch+ = top, roll+ = right)
-    _sprite->drawLine(cx,        cy - maxR, cx - 4, cy - maxR + 5, _c(TFT_CYAN,   n));
-    _sprite->drawLine(cx,        cy - maxR, cx + 4, cy - maxR + 5, _c(TFT_CYAN,   n));
-    _sprite->drawLine(cx + maxR, cy,        cx + maxR - 5, cy - 4, _c(TFT_ORANGE, n));
-    _sprite->drawLine(cx + maxR, cy,        cx + maxR - 5, cy + 4, _c(TFT_ORANGE, n));
+    // YX layout: pitch is a Y-type axis (|code|==2) and roll is X-type (|code|==1).
+    // In that case the crosshair colours and double-arrow icons swap so the colour
+    // always tracks the axis type that matches the crosshair orientation.
+    bool yx = (abs((int)state.pitchAxis) == 2 && abs((int)state.rollAxis) == 1);
+    // vertAxis  = the axis shown by the vertical   crosshair (drives vertical   tilt)
+    // horizAxis = the axis shown by the horizontal crosshair (drives horizontal tilt)
+    int8_t  vertAxis  = yx ? state.rollAxis  : state.pitchAxis;
+    int8_t  horizAxis = yx ? state.pitchAxis : state.rollAxis;
+    uint16_t vertCol  = _c(yx ? TFT_ORANGE : TFT_CYAN,   n);
+    uint16_t horizCol = _c(yx ? TFT_CYAN   : TFT_ORANGE, n);
+
+    // Crosshair lines
+    _sprite->drawLine(cx, cy - maxR, cx, cy + maxR, vertCol);
+    _sprite->drawLine(cx - maxR, cy, cx + maxR, cy, horizCol);
+    // Arrowhead on vertical crosshair: top when vertAxis > 0, bottom when < 0
+    if (vertAxis > 0) {
+        _sprite->drawLine(cx, cy - maxR, cx - 4, cy - maxR + 5, vertCol);
+        _sprite->drawLine(cx, cy - maxR, cx + 4, cy - maxR + 5, vertCol);
+    } else {
+        _sprite->drawLine(cx, cy + maxR, cx - 4, cy + maxR - 5, vertCol);
+        _sprite->drawLine(cx, cy + maxR, cx + 4, cy + maxR - 5, vertCol);
+    }
+    // Arrowhead on horizontal crosshair: right when horizAxis < 0, left when > 0
+    if (horizAxis < 0) {
+        _sprite->drawLine(cx + maxR, cy, cx + maxR - 5, cy - 4, horizCol);
+        _sprite->drawLine(cx + maxR, cy, cx + maxR - 5, cy + 4, horizCol);
+    } else {
+        _sprite->drawLine(cx - maxR, cy, cx - maxR + 5, cy - 4, horizCol);
+        _sprite->drawLine(cx - maxR, cy, cx - maxR + 5, cy + 4, horizCol);
+    }
 
     // Concentric circles for 1°, 2°, 3°
     for (int deg = 1; deg <= 3; deg++) {
@@ -87,7 +133,8 @@ void Display::_drawClinometer(const DeviceState& state) {
     // Bubble position: use sin so the bubble re-centres at ±180° (upside-down level).
     // Scale so sin(3°) == maxR, matching the concentric-circle graduations.
     //
-    // UX convention (ADR 0002): positive pitch = top rises, positive roll = right side rises.
+    // Bubble always uses the standard UX tilt angles (_dispUxPitch/_dispUxRoll), which are
+    // independent of the configured pitch/roll axes, so physical level is always shown correctly.
     // For StickC the display is at setRotation(3); its pixel axes are inverted relative to
     // rotation 1 (used by Core2/CoreS3), so flipSign = -1 keeps the bubble on the high side.
     static const float kDeg2Rad  = 0.017453293f;
@@ -95,10 +142,8 @@ void Display::_drawClinometer(const DeviceState& state) {
     float bubbleScale = (float)maxR / kSin3;
     bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
                   || M5.getBoard() == m5::board_t::board_M5StickCPlus);
-    float hAngle = isStickC ? _dispRoll  : _dispPitch;
-    float vAngle = isStickC ? _dispPitch : _dispRoll;
-    // StickC is fixed at setRotation(3) whose axes are inverted relative to
-    // rotation 1, so negate the displacement to keep the bubble on the high side.
+    float hAngle = isStickC ? _dispUxRoll  : _dispUxPitch;
+    float vAngle = isStickC ? _dispUxPitch : _dispUxRoll;
     float flipSign = isStickC ? -1.0f : 1.0f;
     int bx = cx - (int)(flipSign * sinf(hAngle * kDeg2Rad) * bubbleScale);
     int by = cy + (int)(flipSign * sinf(vAngle * kDeg2Rad) * bubbleScale);
@@ -114,17 +159,22 @@ void Display::_drawClinometer(const DeviceState& state) {
     int px  = cx + maxR + 20;
     int icx = px + 9;  // axis-icon centre x
 
-    // Pitch label: horizontal bar = the horizontal axis, ↕ arrow = direction of tilt
-    uint16_t pCol = _c(TFT_CYAN, n);
+    // Numeric label icons.
+    // In XY layout: pitch gets ↕ (vertical tilt), roll gets ↔ (horizontal tilt).
+    // In YX layout the axes are swapped, so the icons swap too.
+    uint16_t pCol = _c(TFT_CYAN,   n);
+    uint16_t rCol = _c(TFT_ORANGE, n);
     int lyP  = _H *  5 / 135;
+    int lyR  = _H * 62 / 135;
     int icyP = lyP + 8;
-    _sprite->drawLine(icx - 7, icyP,     icx + 7, icyP,     pCol); // horizontal axis
-    _sprite->drawLine(icx,     icyP - 1, icx,     icyP - 5, pCol); // stem up
-    _sprite->drawLine(icx,     icyP - 7, icx - 3, icyP - 4, pCol); // up arrowhead L leg
-    _sprite->drawLine(icx,     icyP - 7, icx + 3, icyP - 4, pCol); // up arrowhead R leg
-    _sprite->drawLine(icx,     icyP + 1, icx,     icyP + 5, pCol); // stem down
-    _sprite->drawLine(icx,     icyP + 7, icx - 3, icyP + 4, pCol); // down arrowhead L leg
-    _sprite->drawLine(icx,     icyP + 7, icx + 3, icyP + 4, pCol); // down arrowhead R leg
+    int icyR = lyR + 8;
+    if (yx) {
+        _drawHorizIcon(_sprite, icx, icyP, pCol);  // pitch → ↔ in YX layout
+        _drawVertIcon (_sprite, icx, icyR, rCol);  // roll  → ↕ in YX layout
+    } else {
+        _drawVertIcon (_sprite, icx, icyP, pCol);  // pitch → ↕ in XY layout
+        _drawHorizIcon(_sprite, icx, icyR, rCol);  // roll  → ↔ in XY layout
+    }
     _sprite->setFont(&fonts::Font2);
     _sprite->setTextColor(pCol);
     _sprite->setCursor(px + 20, lyP);
@@ -136,17 +186,6 @@ void Display::_drawClinometer(const DeviceState& state) {
     fmtAngle(abuf, sizeof(abuf), _dispPitch);
     _sprite->print(abuf);
 
-    // Roll label: vertical bar = the vertical axis, ↔ arrow = direction of tilt
-    uint16_t rCol = _c(TFT_ORANGE, n);
-    int lyR  = _H * 62 / 135;
-    int icyR = lyR + 8;
-    _sprite->drawLine(icx,     icyR - 7, icx,     icyR + 7, rCol); // vertical axis
-    _sprite->drawLine(icx - 1, icyR,     icx - 5, icyR,     rCol); // stem left
-    _sprite->drawLine(icx - 7, icyR,     icx - 4, icyR - 3, rCol); // left arrowhead T leg
-    _sprite->drawLine(icx - 7, icyR,     icx - 4, icyR + 3, rCol); // left arrowhead B leg
-    _sprite->drawLine(icx + 1, icyR,     icx + 5, icyR,     rCol); // stem right
-    _sprite->drawLine(icx + 7, icyR,     icx + 4, icyR - 3, rCol); // right arrowhead T leg
-    _sprite->drawLine(icx + 7, icyR,     icx + 4, icyR + 3, rCol); // right arrowhead B leg
     _sprite->setFont(&fonts::Font2);
     _sprite->setTextColor(rCol);
     _sprite->setCursor(px + 20, lyR);

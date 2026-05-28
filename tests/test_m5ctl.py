@@ -466,6 +466,52 @@ async def test_scan_passes_timeout_to_discover(m5ctl, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
+# set-pitchroll / get-pitchroll command building
+# ---------------------------------------------------------------------------
+
+def test_handler_get_pitchroll(m5ctl, monkeypatch):
+    """get-pitchroll sends GET_PITCHROLL."""
+    assert _cmd(m5ctl, monkeypatch, "get-pitchroll") == "GET_PITCHROLL"
+
+
+def test_handler_set_pitchroll_default(m5ctl, monkeypatch):
+    """+X,+Y (default) is passed through unchanged."""
+    assert _cmd(m5ctl, monkeypatch, "set-pitchroll", "+X,+Y") == "SET_PITCHROLL +X,+Y"
+
+
+def test_handler_set_pitchroll_flip_roll(m5ctl, monkeypatch):
+    """Flipping the roll sign sends the correct command."""
+    assert _cmd(m5ctl, monkeypatch, "set-pitchroll", "+X,-Y") == "SET_PITCHROLL +X,-Y"
+
+
+def test_handler_set_pitchroll_tilde_pitch(m5ctl, monkeypatch):
+    """~ prefix for a negative pitch axis is translated to - before sending."""
+    assert _cmd(m5ctl, monkeypatch, "set-pitchroll", "~X,+Y") == "SET_PITCHROLL -X,+Y"
+
+
+def test_handler_set_pitchroll_tilde_both(m5ctl, monkeypatch):
+    """~X,-Y (negative pitch via ~, explicit negative roll) is translated correctly."""
+    assert _cmd(m5ctl, monkeypatch, "set-pitchroll", "~X,-Y") == "SET_PITCHROLL -X,-Y"
+
+
+def test_handler_set_pitchroll_y_axes(m5ctl, monkeypatch):
+    """Y-type pitch and X-type roll (swapped layout) is accepted."""
+    assert _cmd(m5ctl, monkeypatch, "set-pitchroll", "+Y,+X") == "SET_PITCHROLL +Y,+X"
+
+
+def test_handler_set_pitchroll_bad_axis_exits(m5ctl, monkeypatch):
+    """An unrecognised axis code exits with an error."""
+    with pytest.raises(SystemExit):
+        _cmd(m5ctl, monkeypatch, "set-pitchroll", "+Z,+Y")
+
+
+def test_handler_set_pitchroll_missing_comma_exits(m5ctl, monkeypatch):
+    """A single axis with no comma exits with an error."""
+    with pytest.raises(SystemExit):
+        _cmd(m5ctl, monkeypatch, "set-pitchroll", "+X")
+
+
+# ---------------------------------------------------------------------------
 # _connect — retry logic (no real device required)
 # ---------------------------------------------------------------------------
 

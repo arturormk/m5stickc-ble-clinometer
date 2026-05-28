@@ -21,7 +21,7 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
 - **Plays a brief startup tone** on boot (single 3600 Hz beep) to confirm speaker initialisation; volume is tuned per board family (lower for louder models such as the M5Stack)
-- **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, and calibration reference vector can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot. On devices without an onboard RTC (e.g. M5Stack Grey) the clock is not preserved across power cycles; `SET_TIME` must be re-sent after each reboot
+- **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, calibration reference vector, and pitch/roll axis assignment can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot. On devices without an onboard RTC (e.g. M5Stack Grey) the clock is not preserved across power cycles; `SET_TIME` must be re-sent after each reboot
 
 ## Hardware
 
@@ -158,6 +158,8 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← START_STREAM <ms>
 ← STOP_STREAM
 ← SET_NIGHT_MODE ON|OFF
+← GET_PITCHROLL
+← SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y
 ← BEEP [<notes...>]
 ← PERSIST [CLEAR|RESTORE|READ]
 ← REBOOT
@@ -198,14 +200,16 @@ UX +Y = screen up
 UX +Z = out of the screen, toward the viewer
 ```
 
-Then it applies a fixed sign convention:
+Pitch and roll are then defined as **signed rotations about UX axes**. The defaults are:
 
 ```
-positive pitch = top of screen rises    (+ rotation about UX +X)
-positive roll  = right side rises       (− rotation about UX +Y, intentional sign reversal)
+pitch = + rotation about UX +X   (axis code +X)
+roll  = + rotation about UX +Y   (axis code +Y)
 ```
 
-The roll sign reversal is intentional. A mathematically positive right-hand-rule rotation about UX `+Y` would lower the screen-right side; the project inverts this so that positive roll always means the right side rises. For the recommended telescope mounting — screen-right side toward the aperture — positive roll therefore means the aperture side rises, i.e. altitude increases.
+Both axes follow the standard right-hand rule: for +X, positive pitch means the top of the screen tilts toward the viewer; for +Y, positive roll means the right side of the screen tilts toward the viewer.
+
+These defaults can be changed with `SET_PITCHROLL` and persisted with `PERSIST` — see the [`GET_PITCHROLL` / `SET_PITCHROLL`](#get_pitchroll) section below.
 
 ![IMU axes diagram](docs/adr/m5_imu_axes.jpg)
 
@@ -220,47 +224,18 @@ Device lying flat, screen facing up — UX frame as seen from above:
              |
              |
           (UX +Z points out of the screen, toward you)
-
-positive pitch: the UX +Y edge rises  (top of screen lifts)
-positive roll:  the UX +X edge rises  (right side of screen lifts)
 ```
 
-See [`docs/adr/0002-angle-convention.md`](docs/adr/0002-angle-convention.md) for full derivations and per-device mappings.
+See [`docs/adr/0002-angle-convention.md`](docs/adr/0002-angle-convention.md) for full per-device IMU-to-UX mappings.
 
-**Axis mapping** is device-dependent and detected at runtime via `M5.getBoard()`:
+**Axis mapping** is device-dependent and handled automatically at runtime via `M5.getBoard()`. The same UX-frame convention applies to all supported devices; only the internal IMU-to-UX remapping differs:
 
-| Device | Pitch formula | Roll formula | Pitch axis | Roll axis |
-|---|---|---|---|---|
-| M5StickC Plus / Plus2 | `atan2(-ax, az)` | `atan2(ay, az)` | X | Y |
-| Core2, CoreS3, Grey, others | `atan2(ay, az)` | `atan2(-ax, az)` | Y | X |
+| Device family | UX +X direction in IMU | UX +Y direction in IMU |
+|---|---|---|
+| M5StickC Plus / Plus2 (landscape) | IMU +Y | IMU −X |
+| Core2, CoreS3, Grey, others | IMU +X | IMU +Y |
 
-The IMU inside the StickC series is mounted so that its X axis runs along the physical long axis of the case; tipping the long end therefore changes the X gravity component. Core2 / CoreS3 have the IMU oriented the other way around.
-
-**Reconstructing the acceleration vector** from `TILT <pitch> <roll> <g>`:
-
-The three values are sufficient to recover the full calibrated gravity vector. Let α = pitch in radians, β = roll in radians. Define:
-
-```
-D = sqrt(cos²β + sin²β · cos²α)
-```
-
-Then for **M5StickC Plus / Plus2** (pitch = `atan2(-ax, az)`, roll = `atan2(ay, az)`):
-
-```
-accX = −g · sin(α) · cos(β) / D
-accY = +g · sin(β) · cos(α) / D
-accZ = +g · cos(α) · cos(β) / D
-```
-
-For **Core2, CoreS3, others** (pitch = `atan2(ay, az)`, roll = `atan2(-ax, az)`):
-
-```
-accX = −g · sin(β) · cos(α) / D
-accY = +g · sin(α) · cos(β) / D
-accZ = +g · cos(α) · cos(β) / D
-```
-
-D equals 1 when either angle is zero and decreases toward the extremes; for angles below ~30° it is within 5% of 1, and the familiar small-angle approximation `accX ≈ −g·sin(pitch)`, `accY ≈ g·sin(roll)`, `accZ ≈ g` (StickC) or `accX ≈ −g·sin(roll)`, `accY ≈ g·sin(pitch)` (Core2) is accurate to the same order.
+After remapping, pitch and roll are computed identically for all devices using the configured axis codes.
 
 When a `CALIBRATE` offset is active, these are in the **calibrated frame of reference** — the origin of pitch = 0, roll = 0 is the stored reference orientation, not the hardware default. `CALIBRATE_RESET` returns to the hardware frame (device flat and face-up).
 
@@ -656,6 +631,62 @@ Night mode persists until explicitly disabled or the device reboots. The current
 
 ---
 
+### `GET_PITCHROLL` {#get_pitchroll}
+
+Returns the current pitch and roll axis assignment.
+
+```
+→ GET_PITCHROLL
+← PITCHROLL +X,+Y
+```
+
+The response is always `PITCHROLL <pitch>,<roll>` where each axis is one of `+X`, `-X`, `+Y`, or `-Y`. The default after boot (or after `PERSIST CLEAR`) is `+X,+Y`.
+
+---
+
+### `SET_PITCHROLL <pitch>,<roll>`
+
+Assigns a signed UX axis to pitch and roll. The argument is a comma-separated pair of axis codes with no spaces.
+
+```
+→ SET_PITCHROLL +X,+Y
+← OK PITCHROLL +X,+Y
+
+→ SET_PITCHROLL -X,+Y
+← OK PITCHROLL -X,+Y
+
+→ SET_PITCHROLL +X,-Y
+← OK PITCHROLL +X,-Y
+
+→ SET_PITCHROLL bad
+← ERR BAD_ARGS
+```
+
+**Axis codes:**
+
+| Code | Meaning |
+|---|---|
+| `+X` | + rotation about UX +X (top of screen rises → positive) — default pitch |
+| `−X` | − rotation about UX +X (bottom of screen rises → positive) |
+| `+Y` | + rotation about UX +Y (right side tilts toward viewer → positive) — default roll |
+| `−Y` | − rotation about UX +Y |
+
+Both pitch and roll must be specified; any combination of the four codes is accepted for each position. The assignment takes effect immediately for `GET_TILT` responses, the streaming `TILT` notifications, and the on-screen numeric readout.
+
+The on-screen **bubble level position** is not affected by `SET_PITCHROLL` — the bubble always shows the true physical level in UX screen coordinates. The **crosshair colours** and **double-arrow icons** on the clinometer screen do update:
+
+- When pitch is an X-type axis (`+X`/`-X`) and roll is a Y-type axis (`+Y`/`-Y`): vertical crosshair is cyan (pitch) and horizontal is orange (roll); pitch gets a ↕ icon and roll gets a ↔ icon.
+- When the axes are swapped — pitch is Y-type and roll is X-type: the crosshair colours swap (vertical orange, horizontal cyan) and the icons swap (pitch ↔, roll ↕).
+- The arrowhead on each crosshair always points toward the screen edge that corresponds to a positive value of the axis assigned to that crosshair.
+
+Use `PERSIST` to save the assignment across reboots.
+
+```
+→ ERR BAD_ARGS   (missing roll, unknown code, or no argument)
+```
+
+---
+
 ### `BEEP [note ...]`
 
 Plays a beep or a melody through the built-in speaker. The response is returned immediately while the melody plays asynchronously.
@@ -713,16 +744,16 @@ Up to 32 notes per command.
 
 ### `PERSIST [CLEAR|RESTORE|READ]`
 
-Manages non-volatile storage of user settings. Four values can be persisted: the **timezone label**, **UTC offset**, **observer longitude**, and **calibration reference vector**. NVM writes happen only on an explicit `PERSIST` command — no write occurs during `SET_TIME`, `SET_TIME_ZONE`, `SET_LONGITUDE`, `CALIBRATE`, or `CALIBRATE_RESET`.
+Manages non-volatile storage of user settings. Five values can be persisted: the **timezone label**, **UTC offset**, **observer longitude**, **calibration reference vector**, and **pitch/roll axis assignment**. NVM writes happen only on an explicit `PERSIST` command — no write occurs during `SET_TIME`, `SET_TIME_ZONE`, `SET_LONGITUDE`, `CALIBRATE`, `CALIBRATE_RESET`, or `SET_PITCHROLL`.
 
 #### `PERSIST`
 
-Saves the current timezone label, UTC offset, observer longitude, and calibration reference vector to NVM. Data keys are written first; the validity flag is written last so a power loss mid-write leaves NVM in a clean invalid state.
+Saves the current timezone label, UTC offset, observer longitude, calibration reference vector, and pitch/roll axis assignment to NVM. Data keys are written first; the validity flag is written last so a power loss mid-write leaves NVM in a clean invalid state.
 
 ```
 → PERSIST
-← OK PERSISTED tz=JST tz_offset=32400 lon=135.5000 cal=+0.0023,-0.0150,+0.9999
-← OK PERSISTED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
+← OK PERSISTED tz=JST tz_offset=32400 lon=135.5000 cal=+0.0023,-0.0150,+0.9999 pitchroll=+X,+Y
+← OK PERSISTED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999 pitchroll=+X,+Y
 ```
 
 On the next power-on the device restores all saved values automatically. The UTC time itself is always recovered from the hardware RTC; sidereal phase is recomputed from UTC + longitude using the GMST formula, so the sidereal clock continues correctly without any stored sidereal state.
@@ -742,7 +773,7 @@ Re-enables the stored NVM settings (sets the validity byte back to 1) and immedi
 
 ```
 → PERSIST RESTORE
-← OK RESTORED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
+← OK RESTORED tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999 pitchroll=+X,+Y
 ```
 
 Useful after `PERSIST CLEAR` to roll back without rebooting: the data keys are still in flash and can be re-activated in-session with one write.
@@ -753,7 +784,7 @@ Returns the current NVM contents without modifying anything. Shows the validity 
 
 ```
 → PERSIST READ
-← PERSIST valid=1 tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999
+← PERSIST valid=1 tz=UTC tz_offset=0 lon=(none) cal=+0.0023,-0.0150,+0.9999 pitchroll=+X,+Y
 ```
 
 | Field | Meaning |
@@ -763,6 +794,7 @@ Returns the current NVM contents without modifying anything. Shows the validity 
 | `tz_offset` | UTC offset in seconds (e.g. `32400` = JST +09:00; `0` = UTC) |
 | `lon` | Observer longitude °East, or `(none)` when not configured |
 | `cal` | Stored calibration reference vector `gx,gy,gz`, or `(none)` for identity |
+| `pitchroll` | Stored pitch and roll axis codes, e.g. `+X,+Y` |
 
 ---
 
@@ -886,8 +918,10 @@ options:
 | `listen` | `[--stream <ms>]` | Print all BLE notifications; `--stream <ms>` also starts tilt streaming on the same connection |
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
+| `get-pitchroll` | | Show current pitch and roll axis assignment |
+| `set-pitchroll` | `<pitch>,<roll>` | Set pitch and roll signed UX axes (e.g. `+X,+Y`); use `~` instead of `-` for a negative leading axis to avoid shell flag conflicts |
 | `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
-| `persist` | | Save timezone label, UTC offset, longitude, and calibration to NVM |
+| `persist` | | Save timezone label, UTC offset, longitude, calibration, and pitchroll to NVM |
 | `persist-read` | | Show stored NVM values (validity flag and all keys) |
 | `persist-clear` | | Invalidate stored NVM settings with a single flash write |
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
@@ -920,9 +954,13 @@ uv run tools/m5ctl set-timezone LST
 uv run tools/m5ctl set-longitude 135.5
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
+uv run tools/m5ctl get-pitchroll
+uv run tools/m5ctl set-pitchroll +X,+Y             # default: pitch=+X roll=+Y
+uv run tools/m5ctl set-pitchroll ~X,+Y             # negative pitch axis (use ~ to avoid flag conflict)
+uv run tools/m5ctl set-pitchroll +X,-Y             # flip roll sign
 uv run tools/m5ctl beep
 uv run tools/m5ctl beep "C'4 G8 -16 G8 A4 G8 -2 B4 C'4"
-uv run tools/m5ctl persist                # save tz, offset, longitude, calibration to NVM
+uv run tools/m5ctl persist                # save tz, offset, longitude, calibration, pitchroll to NVM
 uv run tools/m5ctl persist-read           # inspect NVM contents
 uv run tools/m5ctl persist-clear          # invalidate NVM (1 flash write)
 uv run tools/m5ctl persist-restore        # re-enable and apply stored NVM values
@@ -1116,7 +1154,7 @@ uv run pytest tests/test_persistence.py --device AA:BB:CC:DD:EE:FF
 
 The reason it is excluded is flash wear: every `PERSIST` or `PERSIST CLEAR` command writes to the ESP32 NVS flash. Running these tests on every CI or development `pytest` invocation would accumulate unnecessary write cycles. The exclusion is implemented via `addopts = "--ignore=tests/test_persistence.py"` in `pyproject.toml`; pytest's own rules ensure that an explicitly-supplied path on the command line overrides `--ignore`, so `pytest tests/test_persistence.py` still collects and runs all 14 tests.
 
-Each test in the file is preceded by an autouse fixture that sends `PERSIST CLEAR` followed by `SET_LONGITUDE NONE` over BLE, giving every test a known starting state (`valid=0` in NVM and no longitude in RAM) regardless of what prior tests left behind. The two reboot tests (`test_persist_survives_reboot` and `test_clear_survives_reboot`) send the `REBOOT` command, wait 5 seconds for the device to restart and re-advertise, then reconnect and verify the NVM state that the boot loader applied.
+Each test in the file is preceded by an autouse fixture that sends `PERSIST CLEAR`, `SET_LONGITUDE NONE`, and `SET_PITCHROLL +X,+Y` over BLE, giving every test a known starting state (`valid=0` in NVM, no longitude in RAM, and default axis assignment) regardless of what prior tests left behind. The two reboot tests (`test_persist_survives_reboot` and `test_clear_survives_reboot`) send the `REBOOT` command, wait 5 seconds for the device to restart and re-advertise, then reconnect and verify the NVM state that the boot loader applied.
 
 Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
@@ -1149,7 +1187,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   └── m5ctl              Python 3 BLE command-line client
 ├── tests/
 │   ├── conftest.py        BleSession helper and pytest fixtures
-│   ├── test_commands.py   BLE command interface tests
+│   ├── test_commands.py   BLE command interface tests (incl. GET/SET_PITCHROLL)
 │   ├── test_newline.py    Newline-framing protocol tests
 │   ├── test_sanitize.py   Input sanitisation tests (NBSP/ideographic-space normalisation, control-char rejection)
 │   ├── test_m5ctl.py      Unit tests for m5ctl helpers (no device required — always run)
@@ -1163,7 +1201,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - The BLE stack runs on its own FreeRTOS task (managed by the ESP32 Arduino BLE library). All other work runs in the Arduino `loop()` task.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering; sprites are allocated at **8-bit (palette) colour depth** so the full-screen buffer fits in internal SRAM on all supported display sizes — a 320×240 sprite at 16-bit would require ~150 KB, which cannot be allocated alongside the BLE stack on the ESP32; at 8-bit it drops to ~75 KB. All standard colours (black, white, red, green, yellow, grey variants) map exactly or near-exactly to the 216-entry web-safe palette used in this mode. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
-- Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library, namespace `"clino"`. The `huge_app.csv` partition table reserves 20 KB for NVS — the settings payload is under 50 bytes. NVS writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
+- Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library, namespace `"clino"`. Keys: `tz`, `tz_offset`, `longitude`, `cal_gx/gy/gz`, `pitch_ax`, `roll_ax`, `valid`. The `huge_app.csv` partition table reserves 20 KB for NVS — the settings payload is under 60 bytes. NVS writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
 - The clock subsystem uses `esp_timer_get_time()` (int64_t µs, no 49-day wrap) to track elapsed time since the last UTC sync and to advance the Q40 fixed-point sidereal phase. All other timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick, the 200 ms drain wait before `ESP.restart()` on `REBOOT`, and the shutdown melody sequence in `PowerManager::deepSleep()` (blocking is acceptable in both cases since the device is about to reset or power off).
 - Flash usage: ~55% of 3 MB. RAM usage: ~13% of 320 KB.
 

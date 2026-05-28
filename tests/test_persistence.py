@@ -40,8 +40,10 @@ async def _read(s: BleSession) -> dict[str, str]:
     return fields
 
 
-_CAL_RE = re.compile(r"^[+-]\d+\.\d+,[+-]\d+\.\d+,[+-]\d+\.\d+$")
-_LON_RE = re.compile(r"^-?\d+\.\d+$")
+_CAL_RE      = re.compile(r"^[+-]\d+\.\d+,[+-]\d+\.\d+,[+-]\d+\.\d+$")
+_LON_RE      = re.compile(r"^-?\d+\.\d+$")
+_VALID_AXES  = {"+X", "-X", "+Y", "-Y"}
+_AXIS_PAIR_RE = re.compile(r"^([+\-][XY]),([+\-][XY])$")
 
 
 # ---------------------------------------------------------------------------
@@ -52,8 +54,9 @@ _LON_RE = re.compile(r"^-?\d+\.\d+$")
 async def _clean_nvm(device_addr):
     async with BleSession(device_addr) as s:
         await _clear(s)
-        # Reset in-RAM longitude so tests that set a longitude don't bleed state
+        # Reset in-RAM state that tests might change
         await s.send("SET_LONGITUDE NONE")
+        await s.send("SET_PITCHROLL +X,+Y")
     yield
 
 
@@ -76,6 +79,11 @@ async def test_persist_read_format(device_addr):
     # lon is either a float string or "(none)"
     assert fields["lon"] == "(none)" or _LON_RE.match(fields["lon"])
     assert "cal" in fields
+    assert "pitchroll" in fields
+    m = _AXIS_PAIR_RE.match(fields["pitchroll"])
+    assert m, f"unexpected pitchroll format: {fields['pitchroll']!r}"
+    assert m.group(1) in _VALID_AXES
+    assert m.group(2) in _VALID_AXES
 
 
 @pytest.mark.asyncio
@@ -187,6 +195,45 @@ async def test_persist_saves_longitude(device_addr):
     assert fields["valid"] == "1"
     assert _LON_RE.match(fields["lon"]), f"unexpected lon format: {fields['lon']!r}"
     assert abs(float(fields["lon"]) - (-3.7)) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_persist_saves_pitchroll(device_addr):
+    """PERSIST records the pitch/roll axis assignment set via SET_PITCHROLL."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_PITCHROLL -X,+Y")
+        resp = await s.send("PERSIST")
+        assert resp.startswith("OK PERSISTED"), f"unexpected: {resp!r}"
+        assert "pitchroll=-X,+Y" in resp
+        fields = await _read(s)
+    assert fields["valid"] == "1"
+    assert fields["pitchroll"] == "-X,+Y"
+
+
+@pytest.mark.asyncio
+async def test_persist_pitchroll_default_is_plus_x_plus_y(device_addr):
+    """Default pitchroll after PERSIST CLEAR is +X,+Y (applied by Nvm::load)."""
+    async with BleSession(device_addr) as s:
+        # _clean_nvm fixture already cleared NVM and set pitchroll to +X,+Y.
+        # Verify that GET_PITCHROLL reflects the default.
+        resp = await s.send("GET_PITCHROLL")
+    assert resp == "PITCHROLL +X,+Y"
+
+
+@pytest.mark.asyncio
+async def test_persist_pitchroll_survives_restore(device_addr):
+    """PERSIST RESTORE re-applies a saved pitchroll assignment in-session."""
+    async with BleSession(device_addr) as s:
+        await s.send("SET_PITCHROLL +X,-Y")
+        await s.send("PERSIST")
+        await _clear(s)
+        assert (await _read(s))["valid"] == "0"
+        # Restore — pitchroll should come back
+        resp = await s.send("PERSIST RESTORE")
+        assert resp.startswith("OK RESTORED"), f"unexpected: {resp!r}"
+        assert "pitchroll=+X,-Y" in resp
+        resp = await s.send("GET_PITCHROLL")
+    assert resp == "PITCHROLL +X,-Y"
 
 
 # ---------------------------------------------------------------------------

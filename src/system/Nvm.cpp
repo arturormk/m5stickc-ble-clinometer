@@ -7,6 +7,16 @@
 
 static const char* kNs = "clino";
 
+static const char* axisCodeStr(int8_t c) {
+    switch (c) {
+        case  1: return "+X";
+        case -1: return "-X";
+        case  2: return "+Y";
+        case -2: return "-Y";
+        default: return "??";
+    }
+}
+
 // Read the hardware RTC and return a UTC epoch, or 0 if unavailable / not set.
 static time_t readRtcEpoch() {
     if (!M5.Rtc.isEnabled() || M5.Rtc.getVoltLow()) return 0;
@@ -62,9 +72,11 @@ void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
         gz = prefs.getFloat("cal_gz", 1.0f);
     }
 
-    int32_t tzOffset = prefs.getInt("tz_offset", 0);
-    bool    hasLon   = prefs.isKey("longitude");
-    float   lon      = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
+    int32_t tzOffset  = prefs.getInt("tz_offset", 0);
+    bool    hasLon    = prefs.isKey("longitude");
+    float   lon       = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
+    int8_t  pitchAxis = (int8_t)prefs.getChar("pitch_ax", +1);
+    int8_t  rollAxis  = (int8_t)prefs.getChar("roll_ax",  +2);
 
     prefs.end();
 
@@ -74,6 +86,8 @@ void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
     }
     state.timezoneOffsetSec = tzOffset;
     state.longitudeDeg      = lon;
+    state.pitchAxis         = pitchAxis;
+    state.rollAxis          = rollAxis;
 
     if (hasCal) {
         imu.calibrateFrom(gx, gy, gz);
@@ -89,6 +103,12 @@ void Nvm::_applyData(DeviceState& state, ImuManager& imu) {
 }
 
 void Nvm::load(DeviceState& state, ImuManager& imu) {
+    // Apply firmware defaults before NVM can override them.
+    // setup() does memset(&g_state,0,...) which zeroes pitchAxis/rollAxis to 0,
+    // which would hit the default: branch in ImuManager::update() and return 0.0f.
+    state.pitchAxis = +1;
+    state.rollAxis  = +2;
+
     Preferences prefs;
     prefs.begin(kNs, true);
     uint8_t valid = prefs.getUChar("valid", 0);
@@ -112,6 +132,8 @@ bool Nvm::saveAll(const DeviceState& state, ImuManager& imu) {
         prefs.putFloat("longitude", state.longitudeDeg);
     else
         prefs.remove("longitude");
+    prefs.putChar("pitch_ax", state.pitchAxis);
+    prefs.putChar("roll_ax",  state.rollAxis);
     prefs.putUChar("valid", 1);   // written last — atomic commit
     prefs.end();
     return true;
@@ -147,9 +169,11 @@ void Nvm::formatStatus(char* buf, size_t len) {
         gy = prefs.getFloat("cal_gy", 0.0f);
         gz = prefs.getFloat("cal_gz", 1.0f);
     }
-    int32_t tzOffset = prefs.getInt("tz_offset", 0);
-    bool    hasLon   = prefs.isKey("longitude");
-    float   lon      = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
+    int32_t tzOffset  = prefs.getInt("tz_offset", 0);
+    bool    hasLon    = prefs.isKey("longitude");
+    float   lon       = hasLon ? prefs.getFloat("longitude", 0.0f) : NAN;
+    int8_t  pitchAxis = (int8_t)prefs.getChar("pitch_ax", +1);
+    int8_t  rollAxis  = (int8_t)prefs.getChar("roll_ax",  +2);
 
     prefs.end();
 
@@ -166,10 +190,11 @@ void Nvm::formatStatus(char* buf, size_t len) {
         snprintf(lonBuf, sizeof(lonBuf), "(none)");
 
     snprintf(buf, len,
-             "PERSIST valid=%d tz=%s tz_offset=%d lon=%s cal=%s",
+             "PERSIST valid=%d tz=%s tz_offset=%d lon=%s cal=%s pitchroll=%s,%s",
              valid,
              hasTz && tz.length() ? tz.c_str() : "(none)",
              tzOffset,
              lonBuf,
-             calBuf);
+             calBuf,
+             axisCodeStr(pitchAxis), axisCodeStr(rollAxis));
 }

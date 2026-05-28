@@ -44,6 +44,13 @@ struct DeviceState {
     bool     imuAvailable;
     float    pitchDeg;
     float    rollDeg;
+    // Configurable pitch/roll signed axis in UX frame: +1=+X, -1=-X, +2=+Y, -2=-Y
+    // Defaults (+1/-2) are applied in Nvm::load() after setup()'s memset.
+    int8_t   pitchAxis;
+    int8_t   rollAxis;
+    // Standard UX tilt angles (always +X/-Y convention); used for bubble position only
+    float    uxPitchDeg;
+    float    uxRollDeg;
     float    gravX;           // raw filtered gravity X component (device frame, before calibration)
     float    gravY;           // raw filtered gravity Y component (device frame, before calibration)
     float    accMag;          // filtered gravity vector magnitude in g (~1.0 when stationary; data quality indicator)
