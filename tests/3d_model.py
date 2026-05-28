@@ -94,11 +94,13 @@ MODELS = [
 
 @dataclass
 class TiltState:
-    pitch:     float = 0.0
-    roll:      float = 0.0
-    g:         float = 1.0   # gravity magnitude in g units from TILT stream
-    connected: bool  = False
-    error:     str   = ""
+    pitch:       float = 0.0
+    roll:        float = 0.0
+    g:           float = 1.0   # gravity magnitude in g units from TILT stream
+    connected:   bool  = False
+    error:       str   = ""
+    retrying:    bool  = False
+    retry_count: int   = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 # ── BLE worker (asyncio event loop in a daemon thread) ────────────────────────
@@ -114,6 +116,12 @@ class BleWorker:
     def start(self) -> None:
         self._thread.start()
 
+    def signal_stop(self) -> None:
+        self._stop.set()
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=5.0)
@@ -124,28 +132,52 @@ class BleWorker:
 
     async def _run(self) -> None:
         while not self._stop.is_set():
+            client = BleakClient(self._address, timeout=10.0)
             try:
-                async with BleakClient(self._address, timeout=10.0) as client:
+                last_exc: Exception | None = None
+                for attempt in range(3):
                     with self._state.lock:
-                        self._state.connected = True
-                        self._state.error = ""
-                    await client.start_notify(RESP_UUID, self._on_notify)
-                    await client.write_gatt_char(
-                        CMD_UUID, f"START_STREAM {STREAM_MS}".encode(), response=False
-                    )
-                    while not self._stop.is_set() and client.is_connected:
-                        await asyncio.sleep(0.1)
-                    if client.is_connected:
-                        await client.write_gatt_char(CMD_UUID, b"STOP_STREAM", response=False)
+                        self._state.retrying    = attempt > 0
+                        self._state.retry_count = attempt
+                    try:
+                        await client.connect()
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < 2 and not self._stop.is_set():
+                            await asyncio.sleep(0.3 * (attempt + 1))
+                if last_exc is not None:
+                    raise last_exc
+                with self._state.lock:
+                    self._state.connected    = True
+                    self._state.retrying     = False
+                    self._state.retry_count  = 0
+                    self._state.error        = ""
+                await client.start_notify(RESP_UUID, self._on_notify)
+                await client.write_gatt_char(
+                    CMD_UUID, f"START_STREAM {STREAM_MS}".encode(), response=False
+                )
+                while not self._stop.is_set() and client.is_connected:
+                    await asyncio.sleep(0.1)
+                if client.is_connected:
+                    await client.write_gatt_char(CMD_UUID, b"STOP_STREAM", response=False)
             except Exception as exc:
                 with self._state.lock:
-                    self._state.connected = False
-                    self._state.error = str(exc)
+                    self._state.connected    = False
+                    self._state.retrying     = False
+                    self._state.retry_count  = 0
+                    self._state.error        = str(exc)
                 if not self._stop.is_set():
                     await asyncio.sleep(3.0)
             finally:
                 with self._state.lock:
                     self._state.connected = False
+                    self._state.retrying  = False
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
     def _on_notify(self, _sender, data: bytearray) -> None:
         text = data.decode("utf-8", errors="replace").strip()
@@ -292,8 +324,11 @@ class Renderer:
         g: float,
         connected: bool,
         error: str,
+        retrying: bool,
+        retry_count: int,
         demo: bool,
         model: DeviceModel,
+        disconnecting: bool = False,
     ) -> None:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
@@ -331,14 +366,19 @@ class Renderer:
             ay =  g * math.sin(alpha) * math.cos(beta)  / D
             az =  g * math.cos(alpha) * math.cos(beta)  / D
 
-        if demo:
+        blink_on = (pygame.time.get_ticks() // 500) % 2 == 0
+        if disconnecting:
+            ble_status = "disconnecting..." if blink_on else ""
+        elif demo:
             ble_status = "demo mode (no BLE)"
         elif connected:
             ble_status = "connected"
+        elif retrying:
+            ble_status = f"retrying ({retry_count}/3)..." if blink_on else ""
         elif error:
             ble_status = f"error: {error[:48]}"
         else:
-            ble_status = "connecting..."
+            ble_status = "connecting..." if blink_on else ""
 
         hud_lines = [
             f"Pitch: {pitch:+7.2f}°   Roll: {roll:+7.2f}°   g: {g:.2f}",
@@ -456,11 +496,13 @@ def main() -> None:
             model     = MODELS[model_idx]
 
         with state.lock:
-            pitch     = state.pitch
-            roll      = state.roll
-            g         = state.g
-            connected = state.connected
-            error     = state.error
+            pitch       = state.pitch
+            roll        = state.roll
+            g           = state.g
+            connected   = state.connected
+            error       = state.error
+            retrying    = state.retrying
+            retry_count = state.retry_count
 
         if demo_mode:
             t     = pygame.time.get_ticks() / 1000.0
@@ -468,10 +510,26 @@ def main() -> None:
             roll  = 18.0 * math.cos(t * 0.4)
             g     = 1.0
 
-        renderer.render(pitch, roll, g, connected, error, demo_mode, model)
+        renderer.render(pitch, roll, g, connected, error, retrying, retry_count, demo_mode, model)
         clock.tick(60)
 
     if worker:
+        worker.signal_stop()
+        while worker.is_alive():
+            with state.lock:
+                pitch       = state.pitch
+                roll        = state.roll
+                g           = state.g
+                connected   = state.connected
+                error       = state.error
+                retrying    = state.retrying
+                retry_count = state.retry_count
+            renderer.render(
+                pitch, roll, g, connected, error, retrying, retry_count,
+                demo_mode, model, disconnecting=True,
+            )
+            pygame.event.pump()
+            clock.tick(30)
         worker.stop()
     renderer.quit()
 
