@@ -73,9 +73,14 @@ void Display::_drawClinometer(const DeviceState& state) {
     int cy   = _H / 2;
     int maxR = (cx < cy ? cx : cy) - 12;
 
-    // Crosshairs
-    _sprite->drawLine(cx, cy - maxR, cx, cy + maxR, _c(TFT_DARKGREY, n));
-    _sprite->drawLine(cx - maxR, cy, cx + maxR, cy, _c(TFT_DARKGREY, n));
+    // Crosshairs — colour-matched to the Pitch (cyan) and Roll (orange) labels
+    _sprite->drawLine(cx, cy - maxR, cx, cy + maxR, _c(TFT_CYAN,   n)); // vertical   = Pitch axis
+    _sprite->drawLine(cx - maxR, cy, cx + maxR, cy, _c(TFT_ORANGE, n)); // horizontal = Roll axis
+    // Arrowheads indicating positive direction (pitch+ = top, roll+ = right)
+    _sprite->drawLine(cx,        cy - maxR, cx - 4, cy - maxR + 5, _c(TFT_CYAN,   n));
+    _sprite->drawLine(cx,        cy - maxR, cx + 4, cy - maxR + 5, _c(TFT_CYAN,   n));
+    _sprite->drawLine(cx + maxR, cy,        cx + maxR - 5, cy - 4, _c(TFT_ORANGE, n));
+    _sprite->drawLine(cx + maxR, cy,        cx + maxR - 5, cy + 4, _c(TFT_ORANGE, n));
 
     // Concentric circles for 1°, 2°, 3°
     for (int deg = 1; deg <= 3; deg++) {
@@ -123,30 +128,56 @@ void Display::_drawClinometer(const DeviceState& state) {
 
     // Numeric readout — right panel
     char abuf[8];
-    int px = cx + maxR + 20;
-    _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(_c(TFT_CYAN, n));
-    _sprite->setCursor(px, _H *  8 / 135);
+    int px  = cx + maxR + 20;
+    int icx = px + 9;  // axis-icon centre x
+
+    // Pitch label: horizontal bar = the horizontal axis, ↕ arrow = direction of tilt
+    uint16_t pCol = _c(TFT_CYAN, n);
+    int lyP  = _H *  5 / 135;
+    int icyP = lyP + 8;
+    _sprite->drawLine(icx - 7, icyP,     icx + 7, icyP,     pCol); // horizontal axis
+    _sprite->drawLine(icx,     icyP - 1, icx,     icyP - 5, pCol); // stem up
+    _sprite->drawLine(icx,     icyP - 7, icx - 3, icyP - 4, pCol); // up arrowhead L leg
+    _sprite->drawLine(icx,     icyP - 7, icx + 3, icyP - 4, pCol); // up arrowhead R leg
+    _sprite->drawLine(icx,     icyP + 1, icx,     icyP + 5, pCol); // stem down
+    _sprite->drawLine(icx,     icyP + 7, icx - 3, icyP + 4, pCol); // down arrowhead L leg
+    _sprite->drawLine(icx,     icyP + 7, icx + 3, icyP + 4, pCol); // down arrowhead R leg
+    _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(pCol);
+    _sprite->setCursor(px + 20, lyP);
     _sprite->print("Pitch");
+
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(px, _H * 36 / 135);
+    _sprite->setCursor(px, _H * 25 / 135);
     fmtAngle(abuf, sizeof(abuf), _dispPitch);
     _sprite->print(abuf);
 
-    _sprite->setFont(&fonts::Font4);
-    _sprite->setTextColor(_c(TFT_CYAN, n));
-    _sprite->setCursor(px, _H * 68 / 135);
+    // Roll label: vertical bar = the vertical axis, ↔ arrow = direction of tilt
+    uint16_t rCol = _c(TFT_ORANGE, n);
+    int lyR  = _H * 62 / 135;
+    int icyR = lyR + 8;
+    _sprite->drawLine(icx,     icyR - 7, icx,     icyR + 7, rCol); // vertical axis
+    _sprite->drawLine(icx - 1, icyR,     icx - 5, icyR,     rCol); // stem left
+    _sprite->drawLine(icx - 7, icyR,     icx - 4, icyR - 3, rCol); // left arrowhead T leg
+    _sprite->drawLine(icx - 7, icyR,     icx - 4, icyR + 3, rCol); // left arrowhead B leg
+    _sprite->drawLine(icx + 1, icyR,     icx + 5, icyR,     rCol); // stem right
+    _sprite->drawLine(icx + 7, icyR,     icx + 4, icyR - 3, rCol); // right arrowhead T leg
+    _sprite->drawLine(icx + 7, icyR,     icx + 4, icyR + 3, rCol); // right arrowhead B leg
+    _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(rCol);
+    _sprite->setCursor(px + 20, lyR);
     _sprite->print("Roll");
+
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(px, _H * 96 / 135);
+    _sprite->setCursor(px, _H * 82 / 135);
     fmtAngle(abuf, sizeof(abuf), _dispRoll);
     _sprite->print(abuf);
 
     _sprite->setFont(&fonts::Font0);
     _sprite->setTextColor(_c(TFT_DARKGREY, n));
-    _sprite->setCursor(px, _H * 126 / 135);
+    _sprite->setCursor(px, _H * 118 / 135);
     _sprite->print("degrees");
 }
 
