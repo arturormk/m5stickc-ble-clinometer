@@ -17,14 +17,28 @@ _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 def _load_device_addr() -> str | None:
     if not _CONF_FILE.is_file():
         return None
+    entries: dict[str, str] = {}  # name → mac
+    default_name: str | None = None
     for raw in _CONF_FILE.read_text().splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        if "=" in line:
-            key, _, val = line.partition("=")
-            if key.strip() == "device":
-                return val.strip() or None
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().split("#")[0].rstrip()
+        if key == "device":
+            # Legacy single-device format.
+            return val or None
+        if key.startswith("device."):
+            name = key[len("device."):]
+            if name:
+                entries[name] = val[:17]  # MAC is always the first 17 chars
+        elif key == "default_device":
+            default_name = val or None
+    if default_name and default_name in entries:
+        return entries[default_name]
+    if entries:
+        return next(iter(entries.values()))
     return None
 
 
