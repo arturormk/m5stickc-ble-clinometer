@@ -12,7 +12,6 @@ private:
     LGFX_Sprite* _sprite = nullptr;
     uint32_t     _lastRefreshMs = 0;
     int          _W = 0, _H = 0;   // screen dimensions, set in begin()
-    bool         _screenFlipped = false;
     float        _dispPitch = 0.0f;   // display-smoothed pitch, clinometer only
     float        _dispRoll  = 0.0f;   // display-smoothed roll,  clinometer only
 

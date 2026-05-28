@@ -3,7 +3,9 @@
 #include <time.h>
 
 void Display::begin() {
-    M5.Display.setRotation(1);
+    bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+                  || M5.getBoard() == m5::board_t::board_M5StickCPlus);
+    M5.Display.setRotation(isStickC ? 3 : 1);
     M5.Display.setBrightness(128);
     _W = M5.Display.width();
     _H = M5.Display.height();
@@ -22,22 +24,6 @@ void Display::update(const DeviceState& state) {
                          state.screenIndex == SCREEN_MESSAGE) ? 100 : 200;
     if ((now - _lastRefreshMs) < interval) return;
     _lastRefreshMs = now;
-
-    // Auto-rotate 180° based on gravity. Hysteresis at ±0.3 g prevents flicker.
-    // StickC series: long axis is Y → gravX signals upright end.
-    // Other boards: long axis is X → gravY signals orientation.
-    if (state.imuAvailable) {
-        float flipSensor = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
-                         || M5.getBoard() == m5::board_t::board_M5StickCPlus)
-                         ? state.gravX : state.gravY;
-        if (!_screenFlipped && flipSensor < -0.3f) {
-            _screenFlipped = true;
-            M5.Display.setRotation(3);
-        } else if (_screenFlipped && flipSensor > 0.3f) {
-            _screenFlipped = false;
-            M5.Display.setRotation(1);
-        }
-    }
 
     _sprite->fillScreen(TFT_BLACK);
 
@@ -101,12 +87,9 @@ void Display::_drawClinometer(const DeviceState& state) {
     // Bubble position: use sin so the bubble re-centres at ±180° (upside-down level).
     // Scale so sin(3°) == maxR, matching the concentric-circle graduations.
     //
-    // StickC series: the IMU X axis runs along the physical long axis (case Y).
-    // Rotating around the long axis changes gcy → firmware "roll".
-    // Rotating around the short axis changes gcx → firmware "pitch".
-    // On a portrait screen the long axis is vertical, so the horizontal bubble
-    // position tracks roll and the vertical position tracks pitch — swapped
-    // relative to Core2/CoreS3 where the axes align with the screen directly.
+    // UX convention (ADR 0002): positive pitch = top rises, positive roll = right side rises.
+    // For StickC the display is at setRotation(3); its pixel axes are inverted relative to
+    // rotation 1 (used by Core2/CoreS3), so flipSign = -1 keeps the bubble on the high side.
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
@@ -114,9 +97,9 @@ void Display::_drawClinometer(const DeviceState& state) {
                   || M5.getBoard() == m5::board_t::board_M5StickCPlus);
     float hAngle = isStickC ? _dispRoll  : _dispPitch;
     float vAngle = isStickC ? _dispPitch : _dispRoll;
-    // When the screen is flipped 180° both screen axes invert, so negate the
-    // displacement to keep the bubble tracking the physically higher side.
-    float flipSign = _screenFlipped ? -1.0f : 1.0f;
+    // StickC is fixed at setRotation(3) whose axes are inverted relative to
+    // rotation 1, so negate the displacement to keep the bubble on the high side.
+    float flipSign = isStickC ? -1.0f : 1.0f;
     int bx = cx - (int)(flipSign * sinf(hAngle * kDeg2Rad) * bubbleScale);
     int by = cy + (int)(flipSign * sinf(vAngle * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);

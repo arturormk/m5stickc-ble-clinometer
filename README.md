@@ -190,6 +190,43 @@ Returns the current **pitch**, **roll**, and **gravity magnitude** in decimal de
 
 The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis), the second is **roll** (side tilt — rotation around the short axis), and the third is the **gravity vector magnitude in g**. Both angles are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping. The g value is ~1.00 when the device is stationary; it rises when the device is accelerating or vibrating, which signals that the current pitch/roll reading may be noisy.
 
+**Angle convention** — the clinometer reports user-facing angles, not raw IMU Euler values. For every supported device the firmware first defines a screen-aligned UX frame:
+
+```
+UX +X = screen right
+UX +Y = screen up
+UX +Z = out of the screen, toward the viewer
+```
+
+Then it applies a fixed sign convention:
+
+```
+positive pitch = top of screen rises    (+ rotation about UX +X)
+positive roll  = right side rises       (− rotation about UX +Y, intentional sign reversal)
+```
+
+The roll sign reversal is intentional. A mathematically positive right-hand-rule rotation about UX `+Y` would lower the screen-right side; the project inverts this so that positive roll always means the right side rises. For the recommended telescope mounting — screen-right side toward the aperture — positive roll therefore means the aperture side rises, i.e. altitude increases.
+
+![IMU axes diagram](docs/adr/m5_imu_axes.jpg)
+
+```
+Device lying flat, screen facing up — UX frame as seen from above:
+
+          screen up
+             ↑  UX +Y
+             |
+             |
+  UX +X ─────┼─────→  screen right
+             |
+             |
+          (UX +Z points out of the screen, toward you)
+
+positive pitch: the UX +Y edge rises  (top of screen lifts)
+positive roll:  the UX +X edge rises  (right side of screen lifts)
+```
+
+See [`docs/adr/0002-angle-convention.md`](docs/adr/0002-angle-convention.md) for full derivations and per-device mappings.
+
 **Axis mapping** is device-dependent and detected at runtime via `M5.getBoard()`:
 
 | Device | Pitch formula | Roll formula | Pitch axis | Roll axis |

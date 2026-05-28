@@ -127,10 +127,11 @@ class DeviceModel:
     w: float          # X half-dimension in OpenGL units (width / 2)
     h: float          # Y half-dimension (height / 2)
     d: float          # Z half-dimension (depth / 2)
-    # 'X' → M5StickC Plus / Plus2: IMU X runs along the physical long axis;
-    #        pitch=atan2(-ax,az), roll=atan2(ay,az)
-    # 'Y' → Core2, CoreS3, others: IMU Y runs along the physical long axis;
-    #        pitch=atan2(ay,az),  roll=atan2(-ax,az)
+    # pitch_axis: which raw IMU axis carries UX-frame pitch (ADR 0002).
+    #   'X' (StickC) → UX +X = IMU +Y;  pitch=atan2(-ax,az), roll=atan2(ay,az)
+    #   'Y' (Core2)  → UX +X = IMU +X;  pitch=atan2(ay,az),  roll=atan2(-ax,az)
+    # Both families share the same reported convention:
+    #   positive pitch = top of screen rises,  positive roll = right side rises
     pitch_axis: str   = 'Y'
     # Screen inset on the +Z face.  All values are fractions of w or h.
     scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward +X
@@ -398,15 +399,19 @@ class Renderer:
         # axis back toward vertical (harder to see orientation).
         gluLookAt(6.5, -3.0, 5.0,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Apply device orientation: pitch around Y, roll around X.
+        # Firmware normalises to the UX convention (ADR 0002) before transmitting TILT:
+        #   positive pitch = top of screen rises  → rotate model around OGL +Y (landscape long axis)
+        #   positive roll  = right side rises      → rotate model around OGL +X (landscape short axis)
+        # The same rotation applies to both device families; the IMU-to-UX mapping is in firmware.
         glRotatef(pitch, 0.0, 1.0, 0.0)
         glRotatef(roll,  1.0, 0.0, 0.0)
 
         draw_box(model)
         draw_axes(model)
 
-        # Reconstruct acceleration vector from TILT <pitch> <roll> <g>.
-        # Exact inverse of the firmware's atan2 formulas; see README.md for derivation.
+        # Reconstruct raw IMU acceleration vector from TILT <pitch> <roll> <g>.
+        # Exact inverse of the firmware's device-specific atan2 formulas (raw IMU axes,
+        # not UX frame); see README.md for derivation.
         # D = sqrt(cos²β + sin²β·cos²α)  where α=pitch, β=roll (both in radians)
         alpha = math.radians(pitch)
         beta  = math.radians(roll)

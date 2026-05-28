@@ -59,10 +59,22 @@ void ImuManager::update(DeviceState& state) {
     float gcx, gcy, gcz;
     mulMat3Vec3(_calMat, _lastGx, _lastGy, _lastGz, gcx, gcy, gcz);
 
-    // StickC series: IMU X axis runs along the physical long axis (Y of the case),
-    // so tipping the long end changes gcx → pitch = atan2(-gcx, gcz).
-    // Other boards (Core2, CoreS3): IMU Y axis runs along the physical long axis,
-    // so tipping the long end changes gcy → pitch = atan2(gcy, gcz).
+    // ADR 0002: map raw IMU components into a common UX frame, then apply
+    // the project's pitch / roll convention:
+    //
+    //   UX +X = screen right,  UX +Y = screen up,  UX +Z = out of screen
+    //   reported_pitch = + rotation_about(UX +X)  →  top of screen rises
+    //   reported_roll  = - rotation_about(UX +Y)  →  right side of screen rises
+    //
+    // M5StickC Plus / Plus2 (landscape, M5 button left):
+    //   UX +X = IMU +Y,  UX +Y = IMU -X,  UX +Z = IMU +Z
+    //   pitch = +rotation_about(IMU +Y) = atan2(-gcx, gcz)
+    //   roll  = -rotation_about(IMU -X) = +rotation_about(IMU +X) = atan2(gcy, gcz)
+    //
+    // Core2 / CoreS3 (screen axes align with IMU axes):
+    //   UX +X = IMU +X,  UX +Y = IMU +Y,  UX +Z = IMU +Z
+    //   pitch = +rotation_about(IMU +X) = atan2(gcy, gcz)
+    //   roll  = -rotation_about(IMU +Y) = atan2(-gcx, gcz)
     if (M5.getBoard() == m5::board_t::board_M5StickCPlus2
             || M5.getBoard() == m5::board_t::board_M5StickCPlus) {
         state.pitchDeg = atan2f(-gcx, gcz) * 57.2957795f;
