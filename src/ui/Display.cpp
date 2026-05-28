@@ -404,12 +404,12 @@ void Display::_drawBattery(const DeviceState& state) {
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setTextDatum(textdatum_t::top_center);
-    _sprite->drawString("BATTERY", _W / 2, _H * 8 / 135);
+    _sprite->drawString("BATTERY", _W / 2, _H * 20 / 135);
     _sprite->setTextDatum(textdatum_t::top_left);
 
     // Bar geometry
     const int BAR_X = _W * 18 / 240;
-    const int BAR_Y = _H * 36 / 135;
+    const int BAR_Y = _H * 53 / 135;
     const int BAR_W = _W * 192 / 240;
     const int BAR_H = _H * 28 / 135;
     const int TIP_H = BAR_H / 2;
@@ -433,7 +433,7 @@ void Display::_drawBattery(const DeviceState& state) {
     }
 
     // Voltage and percentage below the bar, positioned relative to it
-    int readY = _H * 92 / 135;
+    int readY = _H * 106 / 135;
     int voltX = BAR_X + BAR_W * 3 / 8;
     int pctX  = BAR_X + BAR_W * 7 / 8;
 
