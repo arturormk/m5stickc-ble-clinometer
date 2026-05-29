@@ -136,6 +136,18 @@ static const char* axisCodeStr(int8_t c) {
     }
 }
 
+static const char* boardTypeName(m5::board_t board) {
+    switch (board) {
+        case m5::board_t::board_M5StickCPlus2: return "M5StickCPlus2";
+        case m5::board_t::board_M5StickCPlus:  return "M5StickCPlus";
+        case m5::board_t::board_M5StickC:      return "M5StickC";
+        case m5::board_t::board_M5StackCore2:  return "M5StackCore2";
+        case m5::board_t::board_M5StackCoreS3: return "M5StackCoreS3";
+        case m5::board_t::board_M5Stack:       return "M5Stack";
+        default:                               return "unknown";
+    }
+}
+
 // Build "YYYY-MM-DDTHH:MM:SSZ" from epoch
 static void formatIso8601(time_t t, char* buf, size_t len) {
     struct tm ti;
@@ -257,6 +269,7 @@ static const char* const kHelpLines[] = {
     "START_STREAM <ms>",
     "STOP_STREAM",
     "SET_NIGHT_MODE ON|OFF",
+    "GET_BOARD",
     "GET_PITCHROLL",
     "SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y",
     "BEEP [<notes...>]",
@@ -319,6 +332,9 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
         } else if (strcasecmp(tok, "GET_TILT") == 0) {
             snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f %.2f",
                      s_state->pitchDeg, s_state->rollDeg, s_state->accMag);
+
+        } else if (strcasecmp(tok, "GET_BOARD") == 0) {
+            snprintf(resp, sizeof(resp), "BOARD %s", boardTypeName(M5.getBoard()));
 
         } else if (strcasecmp(tok, "GET_PITCHROLL") == 0) {
             snprintf(resp, sizeof(resp), "PITCHROLL %s,%s",

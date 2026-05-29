@@ -15,12 +15,12 @@ A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (E
 ## What it does
 
 - Shows a live **bubble level** (clinometer) based on the built-in IMU — used to level the telescope mount
-- Displays **time**, **RA/Dec**, and **Alt/Az** coordinates pushed from the Raspberry Pi over BLE
+- Displays live **time** (HH:MM:SS) with configurable timezone — any UTC offset with a custom display label (including multi-word and Unicode names such as `東京標準時間`), or **sidereal time** mode (LST or GST) computed continuously from UTC and observer longitude
+- Displays **RA/Dec** and **Alt/Az** coordinates pushed from the Raspberry Pi over BLE
 - Exposes a **BLE GATT service** so a Raspberry Pi can query tilt angles and update the displayed data at any time, regardless of which screen is active
 - Supports **operator messages** — the Pi can push short text to the display, optionally waiting for a button acknowledgement
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
-- **Auto-rotates the display 180°** when that orientation would put the screen's top edge closer to physical up — all screens flip together, with ±0.3 g hysteresis to prevent flickering near vertical
-- **Plays a brief startup tone** on boot (single 3600 Hz beep) to confirm speaker initialisation; volume is tuned per board family (lower for louder models such as the M5Stack)
+- **Configurable pitch and roll axes** — each angle can be assigned to any signed UX axis (`+X`, `-X`, `+Y`, `-Y`) via `SET_PITCHROLL`, so the clinometer reads correctly regardless of how the device is physically oriented or mounted; the bubble level position always tracks the true physical level independently of the axis assignment
 - **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, calibration reference vector, and pitch/roll axis assignment can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot. On devices without an onboard RTC (e.g. M5Stack Grey) the clock is not preserved across power cycles; `SET_TIME` must be re-sent after each reboot
 
 ## Hardware
@@ -242,6 +242,61 @@ When a `CALIBRATE` offset is active, these are in the **calibrated frame of refe
 **Upside-down behaviour:** when the device is perfectly inverted and level (pitch/roll near ±180°) both values approach ±180°, correctly indicating that it is level but face-down. The on-screen bubble uses `sin(angle)` for its position so it smoothly re-centres at ±180° — the bubble sits at the centre of the circle whether the device is face-up or face-down level. The numeric display and this response always show the true angle.
 
 Values update at ~15 Hz internally; the response reflects the most recent filtered sample.
+
+#### Reconstructing the UX gravity vector from pitch and roll
+
+Given a `TILT p r g` response (angles in degrees, `g` in g units), the three components of the gravity vector in the UX frame can be recovered. The UX axes are screen right (+X), screen up (+Y), and out of the screen toward the viewer (+Z).
+
+Convert the angles to radians and compute the common denominator first:
+
+```
+p = pitch_deg × π/180
+r = roll_deg  × π/180
+D = √(1 − sin²(p) · sin²(r))
+```
+
+**guz** (the screen-normal component) is the same for every `SET_PITCHROLL` configuration:
+
+```
+guz = g · cos(p) · cos(r) / D
+```
+
+`guz` is positive when the screen faces away from the floor and negative when face-down.
+
+**gux and guy** depend on the axis assignment. Note that Y-type axes introduce a sign flip on gux (from the firmware's `atan2(-gux, guz)` convention for the +Y axis).
+
+*Pitch is an X-type axis, roll is a Y-type axis:*
+
+| Pitch | Roll | gux                      | guy                      |
+|-------|------|--------------------------|--------------------------|
+| `+X`  | `+Y` | −g · cos(p) · sin(r) / D | +g · sin(p) · cos(r) / D |
+| `+X`  | `−Y` | +g · cos(p) · sin(r) / D | +g · sin(p) · cos(r) / D |
+| `−X`  | `+Y` | −g · cos(p) · sin(r) / D | −g · sin(p) · cos(r) / D |
+| `−X`  | `−Y` | +g · cos(p) · sin(r) / D | −g · sin(p) · cos(r) / D |
+
+*Pitch is a Y-type axis, roll is an X-type axis:*
+
+| Pitch | Roll | gux                      | guy                      |
+|-------|------|--------------------------|--------------------------|
+| `+Y`  | `+X` | −g · sin(p) · cos(r) / D | +g · cos(p) · sin(r) / D |
+| `+Y`  | `−X` | −g · sin(p) · cos(r) / D | −g · cos(p) · sin(r) / D |
+| `−Y`  | `+X` | +g · sin(p) · cos(r) / D | +g · cos(p) · sin(r) / D |
+| `−Y`  | `−X` | +g · sin(p) · cos(r) / D | −g · cos(p) · sin(r) / D |
+
+**Default configuration** (`SET_PITCHROLL +X,+Y`):
+
+```python
+import math
+p, r = math.radians(pitch_deg), math.radians(roll_deg)
+D   = math.sqrt(1 - math.sin(p)**2 * math.sin(r)**2)
+guz =  g * math.cos(p) * math.cos(r) / D   # screen normal (+Z)
+guy =  g * math.sin(p) * math.cos(r) / D   # screen up    (+Y)
+gux = -g * math.cos(p) * math.sin(r) / D   # screen right (+X)
+```
+
+**Verification:** `√(gux² + guy² + guz²)` should equal `g`. When calibration is active the angles are in the calibrated frame but the magnitude is unchanged.
+
+**Degenerate case:** when both `|p|` and `|r|` approach 90° simultaneously, `D` approaches zero (device pointing straight sideways along the diagonal between +X and +Y). Check `D < ε` before dividing.
 
 ---
 
@@ -902,6 +957,7 @@ options:
 | `calibrate` | `[gx gy gz]` | Calibrate from current orientation (no args) or restore a saved reference vector |
 | `calibrate-reset` | | Remove calibration and restore hardware reference |
 | `status` | | Get device status (screen, BLE, battery, stream, night mode) |
+| `get-board` | | Get the board type identifier (e.g. `M5StickCPlus2`, `M5StackCore2`) |
 | `get-time` | | Get current device time |
 | `get-radec` | | Get stored RA/Dec values |
 | `get-altaz` | | Get stored Alt/Az values |
@@ -937,6 +993,7 @@ uv run tools/m5ctl -d main tilt           # select by config name (device.main =
 uv run tools/m5ctl -d 0 tilt             # select by numeric key  (device.0  = MAC in conf)
 uv run tools/m5ctl help
 uv run tools/m5ctl tilt
+uv run tools/m5ctl get-board
 uv run tools/m5ctl status
 uv run tools/m5ctl set-time-now
 uv run tools/m5ctl set-time-now --utc
@@ -1114,6 +1171,10 @@ It reads the same conf file as `m5ctl`, resolves device names and the `default_d
 | Scan | No `-d`; no conf entry found | Scans for BLE devices, shows a numbered list, prompts for selection |
 | Simulator | `--sim` | Animated demo — no BLE required |
 
+**Automatic device configuration:**
+
+On every connection the viewer sends `GET_BOARD` and `GET_PITCHROLL` to the device. The `GET_BOARD` response selects the correct 3D model geometry and camera angle automatically; the `GET_PITCHROLL` response loads the current axis assignment so the rendered rotation matches exactly what the device is measuring. Manual model selection with `1`/`2`/`3` overrides the auto-detected model for the rest of the session.
+
 **Keyboard controls:**
 
 | Key | Action |
@@ -1121,9 +1182,12 @@ It reads the same conf file as `m5ctl`, resolves device names and the `default_d
 | `1` | Switch to M5StickC Plus 2 model |
 | `2` | Switch to M5Stack Core 2 model |
 | `3` | Switch to M5Stack CoreS3 model |
+| `C` | Toggle axis display: IMU frame ↔ UX/screen frame |
 | `Q` / `Esc` | Quit |
 
-The viewer renders labeled X/Y/Z accelerometer axis arrows that match the physical orientation printed on each device. The HUD shows live pitch/roll angles, the reconstructed gravity vector, and BLE connection state. If the device disconnects, the last known orientation is held and the viewer auto-reconnects after ~3 seconds.
+The viewer renders three RGB axis arrows on the device model. By default these show the **IMU hardware frame** (the raw accelerometer X/Y/Z axes as labelled on the chip). Press `C` to switch to the **UX/screen frame** (X = screen right, Y = screen up, Z = out of screen) defined in ADR 0002. For the M5StickC Plus 2 in landscape the two frames differ visibly — the UX axes are rotated 90° relative to the IMU axes — while for the Core2/CoreS3 the frames coincide. The HUD footer shows the active frame and reminds you of the toggle key.
+
+The HUD also shows live pitch/roll angles, the reconstructed raw IMU gravity vector, and BLE connection state. If the device disconnects, the last known orientation is held and the viewer auto-reconnects after ~3 seconds.
 
 ---
 

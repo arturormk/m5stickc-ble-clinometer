@@ -96,6 +96,23 @@ async def test_get_status_fields(device_addr):
     assert "NIGHT=" in resp
 
 
+_KNOWN_BOARDS = {
+    "M5StickCPlus2", "M5StickCPlus", "M5StickC",
+    "M5StackCore2", "M5StackCoreS3", "M5Stack",
+    "unknown",
+}
+
+
+@pytest.mark.asyncio
+async def test_get_board_format(device_addr):
+    """GET_BOARD returns BOARD <name> where name is a recognised board identifier."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("GET_BOARD")
+    assert resp.startswith("BOARD "), f"unexpected response: {resp!r}"
+    name = resp.split(None, 1)[1]
+    assert name in _KNOWN_BOARDS, f"unrecognised board name: {name!r}"
+
+
 @pytest.mark.asyncio
 async def test_get_time_format(device_addr):
     """GET_TIME should return TIME NONE, ISO-8601 (Z or tz label), or HH:MM:SS <label>."""

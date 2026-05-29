@@ -466,8 +466,13 @@ async def test_scan_passes_timeout_to_discover(m5ctl, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# set-pitchroll / get-pitchroll command building
+# get-board / set-pitchroll / get-pitchroll command building
 # ---------------------------------------------------------------------------
+
+def test_handler_get_board(m5ctl, monkeypatch):
+    """get-board sends GET_BOARD."""
+    assert _cmd(m5ctl, monkeypatch, "get-board") == "GET_BOARD"
+
 
 def test_handler_get_pitchroll(m5ctl, monkeypatch):
     """get-pitchroll sends GET_PITCHROLL."""

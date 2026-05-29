@@ -358,6 +358,7 @@ examples:
   m5ctl -d main tilt        # select device by config name (device.main = MAC in conf)
   m5ctl -d 0 tilt           # select by numeric config key (device.0 = MAC)
   m5ctl tilt                # pitch, roll in degrees, gravity magnitude in g
+  m5ctl get-board           # show board type (e.g. M5StickCPlus2, M5StackCore2)
   m5ctl calibrate                             # zero at current orientation; prints ref vector
   m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
   m5ctl calibrate-reset                       # restore hardware reference
@@ -432,6 +433,7 @@ examples:
                    help="Optional saved reference: gx gy gz from a previous CALIBRATE response")
     sub.add_parser("calibrate-reset", help="Remove calibration and restore hardware reference")
     sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
+    sub.add_parser("get-board",   help="Get the board type identifier")
     sub.add_parser("get-time",    help="Get current device time")
     sub.add_parser("get-radec",   help="Get stored RA/Dec values")
     sub.add_parser("get-altaz",   help="Get stored Alt/Az values")
@@ -606,6 +608,8 @@ examples:
             do_send(args, "CALIBRATE_RESET")
         case "status":
             do_send(args, "GET_STATUS")
+        case "get-board":
+            do_send(args, "GET_BOARD")
         case "get-time":
             do_send(args, "GET_TIME")
         case "get-radec":
