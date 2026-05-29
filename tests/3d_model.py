@@ -170,16 +170,6 @@ BOARD_TO_MODEL: dict[str, int] = {
 }
 
 
-def _ux_axis_to_gl_vec(code: str) -> tuple:
-    """Return the GL rotation axis for a GET_PITCHROLL axis code.
-
-    GL = UX frame, so axis codes map directly to unit GL vectors.
-    """
-    if code == '+X': return ( 1.0, 0.0, 0.0)
-    if code == '-X': return (-1.0, 0.0, 0.0)
-    if code == '+Y': return ( 0.0, 1.0, 0.0)
-    return (0.0, -1.0, 0.0)  # '-Y'
-
 # ── Shared state between BLE thread and render thread ─────────────────────────
 
 @dataclass
@@ -482,21 +472,12 @@ class Renderer:
         ex, ey, ez = model.camera_eye
         gluLookAt(ex, ey, ez,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Rotations are in the UX frame. GL = UX, so axis codes map directly to GL axes.
-        glRotatef(pitch, *_ux_axis_to_gl_vec(pitch_axis))
-        glRotatef(roll,  *_ux_axis_to_gl_vec(roll_axis))
-
-        draw_box(model)
-        draw_axes(model, show_ux)
-
-        # Reconstruct UX gravity vector from TILT angles and axis codes, then
-        # convert to raw IMU axes for display.  D = sqrt(cos²β + sin²β·cos²α).
+        # Reconstruct UX specific-force vector (gux_ux, guy_ux, guz_ux), magnitude g.
+        # D = normalisation factor; equals g when the gravity vector has magnitude g.
         alpha = math.radians(pitch)
         beta  = math.radians(roll)
         D = math.sqrt(math.cos(beta)**2 + math.sin(beta)**2 * math.cos(alpha)**2)
-        if D < 1e-9:
-            ax = ay = az = 0.0
-        else:
+        if D > 1e-9:
             p_sign = +1.0 if pitch_axis[0] == '+' else -1.0
             r_sign = +1.0 if roll_axis[0]  == '+' else -1.0
             base_p = g * math.sin(alpha) * math.cos(beta) / D
@@ -512,11 +493,36 @@ class Renderer:
                 # roll must be X-type: atan2(±guy, guz) → guy = ±base_r
                 gux_ux = -p_sign * base_p
                 guy_ux =  r_sign * base_r
-            ux_g = (gux_ux, guy_ux, guz_ux)
-            ix, iy, iz = model.imu_axes_in_ux
-            ax = ix[0]*ux_g[0] + ix[1]*ux_g[1] + ix[2]*ux_g[2]
-            ay = iy[0]*ux_g[0] + iy[1]*ux_g[1] + iy[2]*ux_g[2]
-            az = iz[0]*ux_g[0] + iz[1]*ux_g[1] + iz[2]*ux_g[2]
+        else:
+            gux_ux = guy_ux = 0.0
+            guz_ux = g
+
+        # Single axis-angle rotation derived from the gravity vector — no gimbal lock.
+        # Two sequential glRotatef (Euler angles) flip the model past 90° because the
+        # second rotation axis is in the already-rotated frame.
+        #
+        # We need active rotation R s.t. R^T·n0 = n1, i.e., R takes n1 → n0, where:
+        #   n0 = (0, 0, -1)  — gravity direction when flat (screen up)
+        #   n1 = -(gux, guy, guz)/g  — current gravity direction in UX frame
+        #
+        # Rodrigues:  axis k = n1 × n0 = (guy/g, -gux/g, 0)
+        #             angle θ = atan2(√(gux²+guy²), guz)   [g cancels]
+        # OpenGL normalises the axis, so pass (guy_ux, -gux_ux, 0) unnormalised.
+        hxy = math.hypot(gux_ux, guy_ux)
+        if hxy > 1e-9:
+            glRotatef(math.degrees(math.atan2(hxy, guz_ux)), guy_ux, -gux_ux, 0.0)
+        elif guz_ux < 0:
+            glRotatef(180.0, 1.0, 0.0, 0.0)   # upside-down edge case
+
+        draw_box(model)
+        draw_axes(model, show_ux)
+
+        # IMU vector for HUD: project UX gravity onto each IMU axis.
+        ux_g = (gux_ux, guy_ux, guz_ux)
+        ix, iy, iz = model.imu_axes_in_ux
+        ax = ix[0]*ux_g[0] + ix[1]*ux_g[1] + ix[2]*ux_g[2]
+        ay = iy[0]*ux_g[0] + iy[1]*ux_g[1] + iy[2]*ux_g[2]
+        az = iz[0]*ux_g[0] + iz[1]*ux_g[1] + iz[2]*ux_g[2]
 
         blink_on = (pygame.time.get_ticks() // 500) % 2 == 0
         if disconnecting:
