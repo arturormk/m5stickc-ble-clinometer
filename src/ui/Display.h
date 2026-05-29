@@ -24,6 +24,7 @@ private:
     void _drawBattery(const DeviceState& state);
     void _drawMessage(const DeviceState& state);
     void _drawBleIndicator(bool connected, bool nightMode);
+    void _drawBatteryWarning(const DeviceState& state);
     void _flush();
     uint16_t _c(uint16_t color, bool night) const;
 };

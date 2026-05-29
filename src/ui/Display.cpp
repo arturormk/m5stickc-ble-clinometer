@@ -37,6 +37,8 @@ void Display::update(const DeviceState& state) {
         default: break;
     }
 
+    if (state.screenIndex != SCREEN_BATTERY)
+        _drawBatteryWarning(state);
     _drawBleIndicator(state.bleConnected, state.nightMode);
     _flush();
 }
@@ -514,6 +516,14 @@ void Display::_drawBattery(const DeviceState& state) {
 void Display::_drawBleIndicator(bool connected, bool nightMode) {
     uint16_t col = connected ? _c(TFT_GREEN, nightMode) : _c(0x4208, nightMode);
     _sprite->fillCircle(_W - 12, 8, 5, col);
+}
+
+void Display::_drawBatteryWarning(const DeviceState& state) {
+    int lvl = state.batteryLevel;
+    if (lvl < 0 || lvl >= 40) return;
+    uint16_t col = (lvl < 20) ? _c(TFT_RED, state.nightMode)
+                               : _c(0xFCA0u, state.nightMode);
+    _sprite->fillTriangle(_W - 17, _H - 3, _W - 3, _H - 3, _W - 10, _H - 13, col);
 }
 
 void Display::_flush() {

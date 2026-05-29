@@ -1,6 +1,6 @@
-# M5StickC Plus 2 Bluetooth Clinometer
+# M5 Bluetooth Clinometer
 
-A BLE-enabled clinometer and telescope status display for the M5StickC Plus 2 (ESP32). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
+A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices (M5StickC Plus 2, Core2, CoreS3, Grey). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
 
 ![Bubble Level](docs/images/clinometer_bubble.png)
 
@@ -80,6 +80,13 @@ The **M5 front button** cycles through screens in order:
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
 | 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
+
+### Status indicators
+
+Two persistent indicators appear on every screen:
+
+- **BLE dot** (top-right corner) — green when a central is connected, dark when not.
+- **Low battery triangle** (bottom-right corner) — a small warning triangle appears when the battery level drops below 40%: orange/amber at 20–39%, red below 20%. No indicator is shown at 40% or above. The battery screen is excluded since it already shows a full charge bar and percentage. In night mode both warning levels render in red to preserve dark-adapted vision.
 
 The display auto-rotates 180° based on the raw IMU gravity reading. When the screen's current top edge drifts more than ~17° past vertical away from physical up, the display flips to the opposite landscape orientation and flips back once the original orientation is again more than ~17° closer to physical up. All screens and overlays rotate together.
 
