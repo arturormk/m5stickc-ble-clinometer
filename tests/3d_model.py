@@ -124,47 +124,39 @@ def _resolve_device(selector: str | None) -> str | None:
 @dataclass(frozen=True)
 class DeviceModel:
     name: str
-    w: float          # X half-dimension in OpenGL units (width / 2)
-    h: float          # Y half-dimension (height / 2)
-    d: float          # Z half-dimension (depth / 2)
-    # pitch_axis: device-hardware UX-to-IMU mapping (ADR 0002), used only for
-    # reconstructing the raw IMU vector shown in the HUD.
-    #   'X' (StickC landscape) → IMU ax = -guy,  ay = gux,  az = guz
-    #   'Y' (Core2/CoreS3)     → IMU ax =  gux,  ay = guy,  az = guz
-    pitch_axis: str   = 'Y'
-    # GL rotation axes derived from the UX-to-model axis mapping for this device.
-    # ux_x_gl: model-space axis vector corresponding to UX +X (screen right).
-    # ux_neg_y_gl: model-space axis vector for UX −Y.
-    #   Used directly for the '+Y' axis code because +Y means negative mathematical
-    #   rotation about UX +Y (ADR 0002: roll = −rotation_about(UX +Y)), which equals
-    #   a positive rotation about UX −Y.
-    # M5StickC Plus 2 landscape: UX +X = model +Y, UX +Y = model −X
-    #   → ux_x_gl=(0,1,0), ux_neg_y_gl=(1,0,0)
-    # Core2 / CoreS3: UX frame = model frame
-    #   → ux_x_gl=(1,0,0), ux_neg_y_gl=(0,−1,0)
-    ux_x_gl:     tuple = (1.0,  0.0, 0.0)
-    ux_neg_y_gl: tuple = (0.0, -1.0, 0.0)
-    # Camera eye position for gluLookAt (target = origin, up = GL +Z).
-    # M5StickC: viewed from +X with slight −Y offset (long Y axis appears horizontal).
-    # Core2/CoreS3: viewed from −Y with 15° rotation about Z (square portrait face visible).
-    camera_eye: tuple = (6.5, -3.0, 5.0)
-    # Screen inset on the +Z face.  All values are fractions of w or h.
-    scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward +X
-    scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward +Y
+    w: float   # UX +X half-dimension (screen right) in OpenGL units
+    h: float   # UX +Y half-dimension (screen up)
+    d: float   # UX +Z half-dimension (screen out / depth)
+    # IMU axis directions in the UX frame (ADR 0002).
+    # Used only to draw the raw IMU axis arrows and reconstruct accX/Y/Z for the HUD.
+    # Core2/CoreS3 (IMU = UX):  ((1,0,0),(0,1,0),(0,0,1))
+    # StickC landscape (UX+X=IMU+Y, UX+Y=IMU−X, UX+Z=IMU+Z):
+    #   IMU+X = UX−Y, IMU+Y = UX+X, IMU+Z = UX+Z → ((0,−1,0),(1,0,0),(0,0,1))
+    imu_axes_in_ux: tuple = ((1.0,0.0,0.0),(0.0,1.0,0.0),(0.0,0.0,1.0))
+    # Camera eye for gluLookAt (target = origin, up = GL +Z = UX +Z = screen out).
+    camera_eye: tuple = (1.8, -6.8, 5.0)
+    # Screen inset on the +Z (UX +Z = screen-out) face.  All values are fractions of w or h.
+    scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward UX +X
+    scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward UX +Y
     scr_w_frac:   float = 0.88  # screen half-width  as fraction of w
     scr_h_frac:   float = 0.88  # screen half-height as fraction of h
 
-# Physical mm → OpenGL units via /20.  Plus 2 is portrait (Y is long axis).
-# Plus 2 screen (~14 × 25 mm) sits toward the +Y end (top in portrait, away
-# from the USB-C port) and is narrower than the body.
+# Physical mm → OpenGL units via /20.  All models are in UX space:
+#   GL +X = screen right (UX +X), GL +Y = screen up (UX +Y), GL +Z = screen out (UX +Z).
+#
+# StickC Plus 2: device is 27.3 × 53.3 × 13.5 mm (portrait).  In landscape (how it is used),
+#   UX +X (screen right) = long physical axis = 53.3 mm → w = 53.3/20
+#   UX +Y (screen up)    = short physical axis = 27.3 mm → h = 27.3/20
+#   Screen ≈ 14 × 25 mm; offset toward screen-right end (away from USB-C in landscape).
+#   scr_w_frac = 25.6/53.3 ≈ 0.48, scr_h_frac = 14.2/27.3 ≈ 0.52, scr_x_offset = 0.25
 MODELS = [
-    DeviceModel("M5StickC Plus 2", w=27.3/20, h=53.3/20, d=13.5/20,
-                pitch_axis='X', ux_x_gl=(0.0, 1.0, 0.0), ux_neg_y_gl=(1.0, 0.0, 0.0),
-                scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
-    DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20,
-                camera_eye=(1.8, -6.8, 5.0)),
-    DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20,
-                camera_eye=(1.8, -6.8, 5.0)),
+    DeviceModel("M5StickC Plus 2",
+                w=53.3/20, h=27.3/20, d=13.5/20,
+                imu_axes_in_ux=((0.0,-1.0,0.0),(1.0,0.0,0.0),(0.0,0.0,1.0)),
+                camera_eye=(1.5, -6.5, 4.0),
+                scr_x_offset=0.25, scr_w_frac=0.48, scr_h_frac=0.52),
+    DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20),
+    DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20),
 ]
 
 # Maps GET_BOARD response strings to MODELS indices.
@@ -178,21 +170,15 @@ BOARD_TO_MODEL: dict[str, int] = {
 }
 
 
-def _axis_to_gl_vec(code: str, ux_x_gl: tuple, ux_neg_y_gl: tuple) -> tuple:
-    """Return the GL rotation axis vector for a GET_PITCHROLL axis code.
+def _ux_axis_to_gl_vec(code: str) -> tuple:
+    """Return the GL rotation axis for a GET_PITCHROLL axis code.
 
-    Each code maps to the GL direction of the named UX axis, so that
-    glRotatef(angle, *result) rotates the device about that UX axis by angle.
-    ux_neg_y_gl stores UX -Y in GL coordinates; negate it to get UX +Y.
+    GL = UX frame, so axis codes map directly to unit GL vectors.
     """
-    if code == '+X':
-        return ux_x_gl
-    elif code == '-X':
-        return (-ux_x_gl[0], -ux_x_gl[1], -ux_x_gl[2])
-    elif code == '+Y':
-        return (-ux_neg_y_gl[0], -ux_neg_y_gl[1], -ux_neg_y_gl[2])
-    else:  # '-Y'
-        return ux_neg_y_gl
+    if code == '+X': return ( 1.0, 0.0, 0.0)
+    if code == '-X': return (-1.0, 0.0, 0.0)
+    if code == '+Y': return ( 0.0, 1.0, 0.0)
+    return (0.0, -1.0, 0.0)  # '-Y'
 
 # ── Shared state between BLE thread and render thread ─────────────────────────
 
@@ -403,17 +389,18 @@ def draw_axes(model: DeviceModel, show_ux: bool = False) -> None:
     quad    = gluNewQuadric()
 
     if show_ux:
-        ux_y = (-model.ux_neg_y_gl[0], -model.ux_neg_y_gl[1], -model.ux_neg_y_gl[2])
+        # GL = UX, so UX axes are always the GL basis vectors.
         axes: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = [
-            ((0.9, 0.15, 0.15), model.ux_x_gl),    # UX +X  red
-            ((0.15, 0.9, 0.15), ux_y),              # UX +Y  green
+            ((0.9, 0.15, 0.15), (1.0, 0.0, 0.0)),  # UX +X  red
+            ((0.15, 0.9, 0.15), (0.0, 1.0, 0.0)),  # UX +Y  green
             ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # UX +Z  blue
         ]
     else:
+        ix, iy, iz = model.imu_axes_in_ux
         axes = [
-            ((0.9, 0.15, 0.15), (1.0, 0.0, 0.0)),  # IMU +X  red
-            ((0.15, 0.9, 0.15), (0.0, 1.0, 0.0)),  # IMU +Y  green
-            ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # IMU +Z  blue
+            ((0.9, 0.15, 0.15), ix),  # IMU +X  red
+            ((0.15, 0.9, 0.15), iy),  # IMU +Y  green
+            ((0.15, 0.35, 0.9), iz),  # IMU +Z  blue
         ]
 
     for color, direction in axes:
@@ -495,13 +482,9 @@ class Renderer:
         ex, ey, ez = model.camera_eye
         gluLookAt(ex, ey, ez,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Map GET_PITCHROLL axis codes to model-space GL rotation vectors and apply.
-        # Axis codes are in the UX/screen frame (+X=screen right, +Y=screen up); the
-        # DeviceModel fields encode how those UX axes map to model coordinates.
-        p_gl = _axis_to_gl_vec(pitch_axis, model.ux_x_gl, model.ux_neg_y_gl)
-        r_gl = _axis_to_gl_vec(roll_axis,  model.ux_x_gl, model.ux_neg_y_gl)
-        glRotatef(pitch, *p_gl)
-        glRotatef(roll,  *r_gl)
+        # Rotations are in the UX frame. GL = UX, so axis codes map directly to GL axes.
+        glRotatef(pitch, *_ux_axis_to_gl_vec(pitch_axis))
+        glRotatef(roll,  *_ux_axis_to_gl_vec(roll_axis))
 
         draw_box(model)
         draw_axes(model, show_ux)
@@ -529,12 +512,11 @@ class Renderer:
                 # roll must be X-type: atan2(±guy, guz) → guy = ±base_r
                 gux_ux = -p_sign * base_p
                 guy_ux =  r_sign * base_r
-            if model.pitch_axis == 'X':
-                # M5StickC landscape: IMU ax = -guy, ay = gux, az = guz
-                ax, ay, az = -guy_ux, gux_ux, guz_ux
-            else:
-                # Core2 / CoreS3: UX frame = IMU frame
-                ax, ay, az = gux_ux, guy_ux, guz_ux
+            ux_g = (gux_ux, guy_ux, guz_ux)
+            ix, iy, iz = model.imu_axes_in_ux
+            ax = ix[0]*ux_g[0] + ix[1]*ux_g[1] + ix[2]*ux_g[2]
+            ay = iy[0]*ux_g[0] + iy[1]*ux_g[1] + iy[2]*ux_g[2]
+            az = iz[0]*ux_g[0] + iz[1]*ux_g[1] + iz[2]*ux_g[2]
 
         blink_on = (pygame.time.get_ticks() // 500) % 2 == 0
         if disconnecting:
