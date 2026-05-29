@@ -137,18 +137,13 @@ void Display::_drawClinometer(const DeviceState& state) {
     //
     // Bubble always uses the standard UX tilt angles (_dispUxPitch/_dispUxRoll), which are
     // independent of the configured pitch/roll axes, so physical level is always shown correctly.
-    // For StickC the display is at setRotation(3); its pixel axes are inverted relative to
-    // rotation 1 (used by Core2/CoreS3), so flipSign = -1 keeps the bubble on the high side.
+    // Convention: uxRoll > 0 = right side up; uxPitch > 0 = top up. Bubble moves toward the
+    // high side, so bx increases with uxRoll and by decreases with uxPitch.
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
-    bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
-                  || M5.getBoard() == m5::board_t::board_M5StickCPlus);
-    float hAngle = isStickC ? _dispUxRoll  : _dispUxPitch;
-    float vAngle = isStickC ? _dispUxPitch : _dispUxRoll;
-    float flipSign = isStickC ? -1.0f : 1.0f;
-    int bx = cx - (int)(flipSign * sinf(hAngle * kDeg2Rad) * bubbleScale);
-    int by = cy + (int)(flipSign * sinf(vAngle * kDeg2Rad) * bubbleScale);
+    int bx = cx + (int)(sinf(_dispUxRoll  * kDeg2Rad) * bubbleScale);
+    int by = cy - (int)(sinf(_dispUxPitch * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;

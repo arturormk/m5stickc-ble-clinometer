@@ -74,10 +74,10 @@ void ImuManager::update(DeviceState& state) {
     float guy = isStickC ? -gcx : gcy;   // UX Y component (screen up)
     float guz = gcz;                     // UX Z component (out of screen)
 
-    // Standard UX tilt angles preserved for bubble display (device-specific, unchanged).
-    // StickC: uxRoll = atan2(gux,guz); Core2: uxRoll = atan2(-gux,guz)
+    // Standard UX tilt angles for bubble display. Convention: positive = high side rises.
+    // uxPitch > 0 when top rises; uxRoll > 0 when right side rises. Same for all boards.
     state.uxPitchDeg = atan2f(guy, guz) * 57.2957795f;
-    state.uxRollDeg  = atan2f(isStickC ? gux : -gux, guz) * 57.2957795f;
+    state.uxRollDeg  = atan2f(gux, guz) * 57.2957795f;
 
     // Configured pitch/roll angles (user-settable via SET_PITCHROLL, default +X/-Y).
     // Axis codes: +1=+X, -1=-X, +2=+Y, -2=-Y
