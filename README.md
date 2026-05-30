@@ -86,7 +86,7 @@ The **M5 front button** cycles through screens in order:
 Two persistent indicators appear on every screen:
 
 - **BLE dot** (top-right corner) — green when a central is connected, dark when not.
-- **Low battery triangle** (bottom-right corner) — a small warning triangle appears when the battery level drops below 40%: orange/amber at 20–39%, red below 20%. No indicator is shown at 40% or above. The battery screen is excluded since it already shows a full charge bar and percentage. In night mode both warning levels render in red to preserve dark-adapted vision.
+- **Battery bar** (bottom-left of the clinometer screen) — a slim horizontal bar of up to 9 segments shows the charge level; each segment lights up for every 10% above 0%. The bar is dark green at 40% or above, dark amber at 20–39%, and dark red below 20%. In night mode all colours shift to red to preserve dark-adapted vision.
 
 The display auto-rotates 180° based on the raw IMU gravity reading. When the screen's current top edge drifts more than ~17° past vertical away from physical up, the display flips to the opposite landscape orientation and flips back once the original orientation is again more than ~17° closer to physical up. All screens and overlays rotate together.
 

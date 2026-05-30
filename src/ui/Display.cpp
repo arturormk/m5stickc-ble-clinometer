@@ -38,8 +38,6 @@ void Display::update(const DeviceState& state) {
         default: break;
     }
 
-    if (state.screenIndex != SCREEN_BATTERY)
-        _drawBatteryWarning(state);
     _drawBleIndicator(state.bleConnected, state.nightMode);
     _flush();
 }
@@ -155,7 +153,7 @@ void Display::_drawClinometer(const DeviceState& state) {
     // Numeric readout — right panel
     char abuf[8];
     int px  = cx + maxR + 20;
-    int icx = px + 9;  // axis-icon centre x
+    int icx = px + 5;  // axis-icon centre x
 
     // Numeric label icons.
     // In XY layout: pitch gets ↕ (vertical tilt), roll gets ↔ (horizontal tilt).
@@ -175,7 +173,7 @@ void Display::_drawClinometer(const DeviceState& state) {
     }
     _sprite->setFont(&fonts::FreeSans9pt7b);
     _sprite->setTextColor(pCol);
-    _sprite->setCursor(px + 20, lyP);
+    _sprite->setCursor(px + 16, lyP);
     _sprite->print("Pitch");
 
     _sprite->setFont(&fonts::Font4);
@@ -186,7 +184,7 @@ void Display::_drawClinometer(const DeviceState& state) {
 
     _sprite->setFont(&fonts::FreeSans9pt7b);
     _sprite->setTextColor(rCol);
-    _sprite->setCursor(px + 20, lyR);
+    _sprite->setCursor(px + 16, lyR);
     _sprite->print("Roll");
 
     _sprite->setFont(&fonts::Font4);
@@ -199,6 +197,17 @@ void Display::_drawClinometer(const DeviceState& state) {
     _sprite->setTextColor(_c(TFT_DARKGREY, n));
     _sprite->setCursor(px, _H * 118 / 135);
     _sprite->print("degrees");
+
+    // Battery bar — 10 segments at bottom of right panel; lit up to level, dim beyond
+    if (state.batteryLevel >= 0) {
+        int lvl = state.batteryLevel;
+        uint16_t col = (lvl < 20) ? _c(0x6000u, n)   // dark red
+                     : (lvl < 40) ? _c(0x7A40u, n)   // dark amber
+                     :              _c(0x0340u,  n);  // dark green
+        uint16_t dim = _c(0x2104u, n);
+        for (int i = 0; i <= 9; i++)
+            _sprite->fillRect(px + i * 7, _H - 3, 6, 4, lvl >= i * 10 ? col : dim);
+    }
 }
 
 void Display::_drawTime(const DeviceState& state) {
@@ -514,13 +523,6 @@ void Display::_drawBleIndicator(bool connected, bool nightMode) {
     _sprite->fillCircle(_W - 12, 8, 5, col);
 }
 
-void Display::_drawBatteryWarning(const DeviceState& state) {
-    int lvl = state.batteryLevel;
-    if (lvl < 0 || lvl >= 40) return;
-    uint16_t col = (lvl < 20) ? _c(TFT_RED, state.nightMode)
-                               : _c(0xFCA0u, state.nightMode);
-    _sprite->fillTriangle(_W - 17, _H - 3, _W - 3, _H - 3, _W - 10, _H - 13, col);
-}
 
 void Display::_flush() {
     _sprite->pushSprite(0, 0);
