@@ -197,7 +197,7 @@ Returns the current **pitch**, **roll**, and **gravity magnitude** in decimal de
 ← TILT +0.42 -1.17 1.00
 ```
 
-The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis), the second is **roll** (side tilt — rotation around the short axis), and the third is the **gravity vector magnitude in g**. Both angles are computed from all three raw accelerometer components using `atan2`, so they cover the full ±180° range without wrapping or clamping. The g value is ~1.00 when the device is stationary; it rises when the device is accelerating or vibrating, which signals that the current pitch/roll reading may be noisy.
+The first value is **pitch** (tilting the screen toward or away from you — rotation around the device's long axis), the second is **roll** (side tilt — rotation around the short axis), and the third is the **gravity vector magnitude in g**. Both angles are computed from all three raw accelerometer components using `atan2` with a cross-axis magnitude denominator, so they cover the full ±180° range without wrapping or clamping and remain stable when both axes are simultaneously tilted. The g value is ~1.00 when the device is stationary; it rises when the device is accelerating or vibrating, which signals that the current pitch/roll reading may be noisy.
 
 **Angle convention** — the clinometer reports user-facing angles, not raw IMU Euler values. For every supported device the firmware first defines a screen-aligned UX frame:
 
@@ -254,56 +254,56 @@ Values update at ~15 Hz internally; the response reflects the most recent filter
 
 Given a `TILT p r g` response (angles in degrees, `g` in g units), the three components of the gravity vector in the UX frame can be recovered. The UX axes are screen right (+X), screen up (+Y), and out of the screen toward the viewer (+Z).
 
-Convert the angles to radians and compute the common denominator first:
+Convert the angles to radians:
 
 ```
 p = pitch_deg × π/180
 r = roll_deg  × π/180
-D = √(1 − sin²(p) · sin²(r))
 ```
 
 **guz** (the screen-normal component) is the same for every `SET_PITCHROLL` configuration:
 
 ```
-guz = g · cos(p) · cos(r) / D
+s   = +1  if both |pitch_deg| ≤ 90° and |roll_deg| ≤ 90°, else −1
+guz = s · g · √(max(0, 1 − sin²(p) − sin²(r)))
 ```
 
-`guz` is positive when the screen faces away from the floor and negative when face-down.
+`guz` is positive when the screen faces away from the floor and negative when face-down. `s` reflects whether the device is past vertical: the firmware's cross-axis atan2 formula propagates the sign of guz into the reported angles (values outside ±90° indicate guz < 0).
 
-**gux and guy** depend on the axis assignment. Note that Y-type axes introduce a sign flip on gux (from the firmware's `atan2(-gux, guz)` convention for the +Y axis).
+**gux and guy** depend on the axis assignment. The cross-axis denominator makes each component simply g times the sine of its angle — no common denominator is needed:
 
 *Pitch is an X-type axis, roll is a Y-type axis:*
 
-| Pitch | Roll | gux                      | guy                      |
-|-------|------|--------------------------|--------------------------|
-| `+X`  | `+Y` | −g · cos(p) · sin(r) / D | +g · sin(p) · cos(r) / D |
-| `+X`  | `−Y` | +g · cos(p) · sin(r) / D | +g · sin(p) · cos(r) / D |
-| `−X`  | `+Y` | −g · cos(p) · sin(r) / D | −g · sin(p) · cos(r) / D |
-| `−X`  | `−Y` | +g · cos(p) · sin(r) / D | −g · sin(p) · cos(r) / D |
+| Pitch | Roll | gux         | guy         |
+|-------|------|-------------|-------------|
+| `+X`  | `+Y` | −g · sin(r) | +g · sin(p) |
+| `+X`  | `−Y` | +g · sin(r) | +g · sin(p) |
+| `−X`  | `+Y` | −g · sin(r) | −g · sin(p) |
+| `−X`  | `−Y` | +g · sin(r) | −g · sin(p) |
 
 *Pitch is a Y-type axis, roll is an X-type axis:*
 
-| Pitch | Roll | gux                      | guy                      |
-|-------|------|--------------------------|--------------------------|
-| `+Y`  | `+X` | −g · sin(p) · cos(r) / D | +g · cos(p) · sin(r) / D |
-| `+Y`  | `−X` | −g · sin(p) · cos(r) / D | −g · cos(p) · sin(r) / D |
-| `−Y`  | `+X` | +g · sin(p) · cos(r) / D | +g · cos(p) · sin(r) / D |
-| `−Y`  | `−X` | +g · sin(p) · cos(r) / D | −g · cos(p) · sin(r) / D |
+| Pitch | Roll | gux         | guy         |
+|-------|------|-------------|-------------|
+| `+Y`  | `+X` | −g · sin(p) | +g · sin(r) |
+| `+Y`  | `−X` | −g · sin(p) | −g · sin(r) |
+| `−Y`  | `+X` | +g · sin(p) | +g · sin(r) |
+| `−Y`  | `−X` | +g · sin(p) | −g · sin(r) |
 
 **Default configuration** (`SET_PITCHROLL +X,+Y`):
 
 ```python
 import math
 p, r = math.radians(pitch_deg), math.radians(roll_deg)
-D   = math.sqrt(1 - math.sin(p)**2 * math.sin(r)**2)
-guz =  g * math.cos(p) * math.cos(r) / D   # screen normal (+Z)
-guy =  g * math.sin(p) * math.cos(r) / D   # screen up    (+Y)
-gux = -g * math.cos(p) * math.sin(r) / D   # screen right (+X)
+s   = 1.0 if (abs(pitch_deg) <= 90.0 and abs(roll_deg) <= 90.0) else -1.0
+guz =  s * g * math.sqrt(max(0.0, 1.0 - math.sin(p)**2 - math.sin(r)**2))  # screen normal (+Z)
+guy =  g * math.sin(p)                                                        # screen up    (+Y)
+gux = -g * math.sin(r)                                                        # screen right (+X)
 ```
 
 **Verification:** `√(gux² + guy² + guz²)` should equal `g`. When calibration is active the angles are in the calibrated frame but the magnitude is unchanged.
 
-**Degenerate case:** when both `|p|` and `|r|` approach 90° simultaneously, `D` approaches zero (device pointing straight sideways along the diagonal between +X and +Y). Check `D < ε` before dividing.
+**Degenerate case:** reconstruction is undefined only when `g = 0` (free fall). Check `g > ε` before computing.
 
 ---
 
@@ -1194,7 +1194,7 @@ On every connection the viewer sends `GET_BOARD` and `GET_PITCHROLL` to the devi
 
 The viewer renders three RGB axis arrows on the device model. By default these show the **IMU hardware frame** (the raw accelerometer X/Y/Z axes as labelled on the chip). Press `C` to switch to the **UX/screen frame** (X = screen right, Y = screen up, Z = out of screen) defined in ADR 0002. For the M5StickC Plus 2 in landscape the two frames differ visibly — the UX axes are rotated 90° relative to the IMU axes — while for the Core2/CoreS3 the frames coincide. The HUD footer shows the active frame and reminds you of the toggle key.
 
-The HUD also shows live pitch/roll angles, the reconstructed raw IMU gravity vector, and BLE connection state. If the device disconnects, the last known orientation is held and the viewer auto-reconnects after ~3 seconds.
+The HUD also shows live pitch/roll angles, the reconstructed raw IMU gravity vector, and BLE connection state. The viewer maintains a continuous orientation quaternion — rather than recomputing a minimal axis-angle rotation from scratch each frame — so the model rotates smoothly through the full ±180° inversion range without discontinuities. If the device disconnects, the last known orientation is held and the viewer auto-reconnects after ~3 seconds.
 
 ---
 
@@ -1243,7 +1243,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   └── DeviceState.h  Shared state struct accessed by all modules
 │   ├── imu/
 │   │   ├── ImuManager.h
-│   │   └── ImuManager.cpp Pitch/Roll sampling at ~15 Hz; atan2 full-range formula, Rodrigues calibration matrix
+│   │   └── ImuManager.cpp Pitch/Roll sampling at ~15 Hz; cross-axis atan2 formula (full ±180° range, stable through coupled tilts), Rodrigues calibration matrix
 │   ├── ble/
 │   │   ├── BleManager.h
 │   │   └── BleManager.cpp GATT server, command parser, response/event notify

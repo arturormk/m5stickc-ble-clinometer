@@ -54,13 +54,12 @@ def _get_conf_path() -> pathlib.Path:
         if local.is_file():
             return local
     else:
-        project_root = pathlib.Path(__file__).resolve().parent.parent
-        hidden = project_root / ".m5ctl.conf"
-        if hidden.is_file():
-            return hidden
-        nondot = project_root / "m5ctl.conf"
-        if nondot.is_file():
-            return nondot
+        project_root = pathlib.Path(__file__).resolve().parent.parent / ".m5ctl.conf"
+        if project_root.is_file():
+            return project_root
+        tools_local = pathlib.Path(__file__).resolve().parent / "m5ctl.conf"
+        if tools_local.is_file():
+            return tools_local
     return pathlib.Path.home() / ".m5ctl.conf"
 
 
@@ -124,39 +123,47 @@ def _resolve_device(selector: str | None) -> str | None:
 @dataclass(frozen=True)
 class DeviceModel:
     name: str
-    w: float   # UX +X half-dimension (screen right) in OpenGL units
-    h: float   # UX +Y half-dimension (screen up)
-    d: float   # UX +Z half-dimension (screen out / depth)
-    # IMU axis directions in the UX frame (ADR 0002).
-    # Used only to draw the raw IMU axis arrows and reconstruct accX/Y/Z for the HUD.
-    # Core2/CoreS3 (IMU = UX):  ((1,0,0),(0,1,0),(0,0,1))
-    # StickC landscape (UX+X=IMU+Y, UX+Y=IMU−X, UX+Z=IMU+Z):
-    #   IMU+X = UX−Y, IMU+Y = UX+X, IMU+Z = UX+Z → ((0,−1,0),(1,0,0),(0,0,1))
-    imu_axes_in_ux: tuple = ((1.0,0.0,0.0),(0.0,1.0,0.0),(0.0,0.0,1.0))
-    # Camera eye for gluLookAt (target = origin, up = GL +Z = UX +Z = screen out).
-    camera_eye: tuple = (1.8, -6.8, 5.0)
-    # Screen inset on the +Z (UX +Z = screen-out) face.  All values are fractions of w or h.
-    scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward UX +X
-    scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward UX +Y
+    w: float          # X half-dimension in OpenGL units (width / 2)
+    h: float          # Y half-dimension (height / 2)
+    d: float          # Z half-dimension (depth / 2)
+    # pitch_axis: device-hardware UX-to-IMU mapping (ADR 0002), used only for
+    # reconstructing the raw IMU vector shown in the HUD.
+    #   'X' (StickC landscape) → IMU ax = -guy,  ay = gux,  az = guz
+    #   'Y' (Core2/CoreS3)     → IMU ax =  gux,  ay = guy,  az = guz
+    pitch_axis: str   = 'Y'
+    # GL rotation axes derived from the UX-to-model axis mapping for this device.
+    # ux_x_gl: model-space axis vector corresponding to UX +X (screen right).
+    # ux_neg_y_gl: model-space axis vector for UX −Y.
+    #   Used directly for the '+Y' axis code because +Y means negative mathematical
+    #   rotation about UX +Y (ADR 0002: roll = −rotation_about(UX +Y)), which equals
+    #   a positive rotation about UX −Y.
+    # M5StickC Plus 2 landscape: UX +X = model +Y, UX +Y = model −X
+    #   → ux_x_gl=(0,1,0), ux_neg_y_gl=(1,0,0)
+    # Core2 / CoreS3: UX frame = model frame
+    #   → ux_x_gl=(1,0,0), ux_neg_y_gl=(0,−1,0)
+    ux_x_gl:     tuple = (1.0,  0.0, 0.0)
+    ux_neg_y_gl: tuple = (0.0, -1.0, 0.0)
+    # Camera eye position for gluLookAt (target = origin, up = GL +Z).
+    # M5StickC: viewed from +X with slight −Y offset (long Y axis appears horizontal).
+    # Core2/CoreS3: viewed from −Y with 15° rotation about Z (square portrait face visible).
+    camera_eye: tuple = (6.5, -3.0, 5.0)
+    # Screen inset on the +Z face.  All values are fractions of w or h.
+    scr_x_offset: float = 0.0   # screen centre shift as fraction of w toward +X
+    scr_y_offset: float = 0.0   # screen centre shift as fraction of h toward +Y
     scr_w_frac:   float = 0.88  # screen half-width  as fraction of w
     scr_h_frac:   float = 0.88  # screen half-height as fraction of h
 
-# Physical mm → OpenGL units via /20.  All models are in UX space:
-#   GL +X = screen right (UX +X), GL +Y = screen up (UX +Y), GL +Z = screen out (UX +Z).
-#
-# StickC Plus 2: device is 27.3 × 53.3 × 13.5 mm (portrait).  In landscape (how it is used),
-#   UX +X (screen right) = long physical axis = 53.3 mm → w = 53.3/20
-#   UX +Y (screen up)    = short physical axis = 27.3 mm → h = 27.3/20
-#   Screen ≈ 14 × 25 mm; offset toward screen-right end (away from USB-C in landscape).
-#   scr_w_frac = 25.6/53.3 ≈ 0.48, scr_h_frac = 14.2/27.3 ≈ 0.52, scr_x_offset = 0.25
+# Physical mm → OpenGL units via /20.  Plus 2 is portrait (Y is long axis).
+# Plus 2 screen (~14 × 25 mm) sits toward the +Y end (top in portrait, away
+# from the USB-C port) and is narrower than the body.
 MODELS = [
-    DeviceModel("M5StickC Plus 2",
-                w=53.3/20, h=27.3/20, d=13.5/20,
-                imu_axes_in_ux=((0.0,-1.0,0.0),(1.0,0.0,0.0),(0.0,0.0,1.0)),
-                camera_eye=(1.5, -6.5, 4.0),
-                scr_x_offset=0.25, scr_w_frac=0.48, scr_h_frac=0.52),
-    DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20),
-    DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20),
+    DeviceModel("M5StickC Plus 2", w=27.3/20, h=53.3/20, d=13.5/20,
+                pitch_axis='X', ux_x_gl=(0.0, 1.0, 0.0), ux_neg_y_gl=(1.0, 0.0, 0.0),
+                scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
+    DeviceModel("M5Stack Core 2",  w=54.0/20, h=54.0/20, d=16.0/20,
+                camera_eye=(1.8, -6.8, 5.0)),
+    DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20,
+                camera_eye=(1.8, -6.8, 5.0)),
 ]
 
 # Maps GET_BOARD response strings to MODELS indices.
@@ -168,7 +175,6 @@ BOARD_TO_MODEL: dict[str, int] = {
     "M5StackCoreS3": 2,
     "M5Stack":       1,  # original Core falls back to Core2 geometry
 }
-
 
 # ── Shared state between BLE thread and render thread ─────────────────────────
 
@@ -219,10 +225,10 @@ class BleWorker:
         while not self._stop.is_set():
             client = BleakClient(self._address, timeout=10.0)
             try:
-                last_exc: Exception | None = None
+                last_exc = None
                 for attempt in range(3):
                     with self._state.lock:
-                        self._state.retrying    = attempt > 0
+                        self._state.retrying = attempt > 0
                         self._state.retry_count = attempt
                     try:
                         await client.connect()
@@ -234,49 +240,64 @@ class BleWorker:
                             await asyncio.sleep(0.3 * (attempt + 1))
                 if last_exc is not None:
                     raise last_exc
+
                 with self._state.lock:
-                    self._state.connected    = True
-                    self._state.retrying     = False
-                    self._state.retry_count  = 0
-                    self._state.error        = ""
+                    self._state.connected = True
+                    self._state.retrying = False
+                    self._state.retry_count = 0
+                    self._state.error = ""
+
                 await client.start_notify(RESP_UUID, self._on_notify)
+
+                # Send GET_BOARD and GET_PITCHROLL sequentially so the firmware's
+                # single-slot pendingBleResponse buffer isn't overwritten before the
+                # main loop dispatches the first notification.
+                self._board_event = asyncio.Event()
+                await client.write_gatt_char(CMD_UUID, b"GET_BOARD", response=False)
+                try:
+                    await asyncio.wait_for(self._board_event.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+                self._board_event = None
+
                 self._pitchroll_event = asyncio.Event()
-                self._board_event     = asyncio.Event()
-                await client.write_gatt_char(CMD_UUID, b"GET_BOARD",     response=False)
                 await client.write_gatt_char(CMD_UUID, b"GET_PITCHROLL", response=False)
                 try:
-                    await asyncio.wait_for(
-                        asyncio.gather(self._board_event.wait(),
-                                       self._pitchroll_event.wait()),
-                        timeout=3.0,
-                    )
+                    await asyncio.wait_for(self._pitchroll_event.wait(), timeout=2.0)
                 except asyncio.TimeoutError:
-                    pass  # keep defaults
+                    pass
                 self._pitchroll_event = None
-                self._board_event     = None
+
+                # STREAM start
                 await client.write_gatt_char(
                     CMD_UUID, f"START_STREAM {STREAM_MS}".encode(), response=False
                 )
+
                 while not self._stop.is_set() and client.is_connected:
                     await asyncio.sleep(0.1)
+
                 if client.is_connected:
                     await client.write_gatt_char(CMD_UUID, b"STOP_STREAM", response=False)
+
             except Exception as exc:
                 with self._state.lock:
-                    self._state.connected    = False
-                    self._state.retrying     = False
-                    self._state.retry_count  = 0
-                    self._state.error        = str(exc)
+                    self._state.connected = False
+                    self._state.retrying = False
+                    self._state.retry_count = 0
+                    self._state.error = str(exc)
+
                 if not self._stop.is_set():
                     await asyncio.sleep(3.0)
+
             finally:
                 with self._state.lock:
                     self._state.connected = False
-                    self._state.retrying  = False
+                    self._state.retrying = False
                 try:
                     await client.disconnect()
                 except Exception:
                     pass
+
 
     def _on_notify(self, _sender, data: bytearray) -> None:
         text = data.decode("utf-8", errors="replace").strip()
@@ -379,18 +400,17 @@ def draw_axes(model: DeviceModel, show_ux: bool = False) -> None:
     quad    = gluNewQuadric()
 
     if show_ux:
-        # GL = UX, so UX axes are always the GL basis vectors.
+        ux_y = (-model.ux_neg_y_gl[0], -model.ux_neg_y_gl[1], -model.ux_neg_y_gl[2])
         axes: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = [
-            ((0.9, 0.15, 0.15), (1.0, 0.0, 0.0)),  # UX +X  red
-            ((0.15, 0.9, 0.15), (0.0, 1.0, 0.0)),  # UX +Y  green
+            ((0.9, 0.15, 0.15), model.ux_x_gl),    # UX +X  red
+            ((0.15, 0.9, 0.15), ux_y),              # UX +Y  green
             ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # UX +Z  blue
         ]
     else:
-        ix, iy, iz = model.imu_axes_in_ux
         axes = [
-            ((0.9, 0.15, 0.15), ix),  # IMU +X  red
-            ((0.15, 0.9, 0.15), iy),  # IMU +Y  green
-            ((0.15, 0.35, 0.9), iz),  # IMU +Z  blue
+            ((0.9, 0.15, 0.15), (1.0, 0.0, 0.0)),  # IMU +X  red
+            ((0.15, 0.9, 0.15), (0.0, 1.0, 0.0)),  # IMU +Y  green
+            ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # IMU +Z  blue
         ]
 
     for color, direction in axes:
@@ -401,6 +421,58 @@ def draw_axes(model: DeviceModel, show_ux: bool = False) -> None:
         glPopMatrix()
 
     gluDeleteQuadric(quad)
+
+
+# ── Quaternion helpers ────────────────────────────────────────────────────────
+
+def _quat_mul(q1: tuple, q2: tuple) -> tuple:
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return (
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+    )
+
+
+def _quat_normalize(q: tuple) -> tuple:
+    w, x, y, z = q
+    n = math.sqrt(w*w + x*x + y*y + z*z)
+    if n < 1e-12:
+        return (1.0, 0.0, 0.0, 0.0)
+    return (w/n, x/n, y/n, z/n)
+
+
+def _quat_from_vecs(a: tuple, b: tuple) -> tuple:
+    """Shortest-arc quaternion rotating unit vector a to unit vector b."""
+    dot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+    cx  = a[1]*b[2] - a[2]*b[1]
+    cy  = a[2]*b[0] - a[0]*b[2]
+    cz  = a[0]*b[1] - a[1]*b[0]
+    w   = 1.0 + dot
+    if w < 1e-6:
+        # Anti-parallel: rotate 180° about any perpendicular axis.
+        if abs(a[0]) < 0.9:
+            px, py, pz = 0.0, -a[2], a[1]
+        else:
+            px, py, pz = a[2], 0.0, -a[0]
+        n = math.sqrt(px*px + py*py + pz*pz)
+        return (0.0, px/n, py/n, pz/n)
+    return _quat_normalize((w, cx, cy, cz))
+
+
+def _quat_to_axis_angle(q: tuple) -> tuple:
+    """Return (ax, ay, az, angle_deg) suitable for glRotatef."""
+    w, x, y, z = _quat_normalize(q)
+    if w < 0:
+        w, x, y, z = -w, -x, -y, -z
+    w         = min(1.0, w)
+    angle_rad = 2.0 * math.acos(w)
+    s         = math.sqrt(max(0.0, 1.0 - w*w))
+    if s < 1e-8:
+        return (0.0, 0.0, 1.0, math.degrees(angle_rad))
+    return (x/s, y/s, z/s, math.degrees(angle_rad))
 
 
 # ── Renderer ──────────────────────────────────────────────────────────────────
@@ -427,6 +499,9 @@ class Renderer:
         if _GLUT_OK:
             glutInit()
 
+        self._orient_q:  tuple        = (1.0, 0.0, 0.0, 0.0)
+        self._prev_grav: tuple | None = None
+
     def handle_events(self) -> tuple[bool, int | None, bool]:
         new_model: int | None = None
         toggle_axes = False
@@ -446,22 +521,9 @@ class Renderer:
                     toggle_axes = True
         return False, new_model, toggle_axes
 
-    def render(
-        self,
-        pitch: float,
-        roll: float,
-        g: float,
-        connected: bool,
-        error: str,
-        retrying: bool,
-        retry_count: int,
-        demo: bool,
-        model: DeviceModel,
-        disconnecting: bool = False,
-        pitch_axis: str = '+X',
-        roll_axis:  str = '+Y',
-        show_ux: bool = False,
-    ) -> None:
+    def render(self, pitch, roll, g, connected, error, retrying, retry_count,
+               demo, model, disconnecting=False, pitch_axis='+X', roll_axis='+Y',
+               show_ux=False, board_name=""):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         glMatrixMode(GL_MODELVIEW)
@@ -472,57 +534,54 @@ class Renderer:
         ex, ey, ez = model.camera_eye
         gluLookAt(ex, ey, ez,  0.0, 0.0, 0.0,  0.0, 0.0, 1.0)
 
-        # Reconstruct UX specific-force vector (gux_ux, guy_ux, guz_ux), magnitude g.
-        # D = normalisation factor; equals g when the gravity vector has magnitude g.
-        alpha = math.radians(pitch)
-        beta  = math.radians(roll)
-        D = math.sqrt(math.cos(beta)**2 + math.sin(beta)**2 * math.cos(alpha)**2)
-        if D > 1e-9:
-            p_sign = +1.0 if pitch_axis[0] == '+' else -1.0
-            r_sign = +1.0 if roll_axis[0]  == '+' else -1.0
-            base_p = g * math.sin(alpha) * math.cos(beta) / D
-            base_r = g * math.sin(beta)  * math.cos(alpha) / D
-            guz_ux = g * math.cos(alpha) * math.cos(beta)  / D
-            if pitch_axis[1] == 'X':
-                # +X / -X pitch: atan2(±guy, guz) → guy = ±base_p
-                # roll must be Y-type: atan2(∓gux, guz) → gux = ∓base_r
-                guy_ux =  p_sign * base_p
-                gux_ux = -r_sign * base_r
-            else:
-                # +Y / -Y pitch: atan2(∓gux, guz) → gux = ∓base_p
-                # roll must be X-type: atan2(±guy, guz) → guy = ±base_r
-                gux_ux = -p_sign * base_p
-                guy_ux =  r_sign * base_r
+        # Reconstruct UX gravity vector from TILT angles and axis codes.
+        # Firmware uses atan2(component, cross-axis-magnitude), so component = g·sin(angle).
+        alpha  = math.radians(pitch)
+        beta   = math.radians(roll)
+        sa, sb = math.sin(alpha), math.sin(beta)
+        p_sign = +1.0 if pitch_axis[0] == '+' else -1.0
+        r_sign = +1.0 if roll_axis[0]  == '+' else -1.0
+        if pitch_axis[1] == 'X':
+            # +X/-X pitch: atan2(±guy, …) = pitch  →  guy = ±g·sin(pitch)
+            # -Y/+Y roll:  atan2(∓gux, …) = roll   →  gux = ∓g·sin(roll)
+            guy_ux =  p_sign * g * sa
+            gux_ux = -r_sign * g * sb
         else:
-            gux_ux = guy_ux = 0.0
-            guz_ux = g
+            # +Y/-Y pitch: atan2(∓gux, …) = pitch  →  gux = ∓g·sin(pitch)
+            # +X/-X roll:  atan2(±guy, …) = roll   →  guy = ±g·sin(roll)
+            gux_ux = -p_sign * g * sa
+            guy_ux =  r_sign * g * sb
+        guz_mag = math.sqrt(max(0.0, g*g - guy_ux*guy_ux - gux_ux*gux_ux))
+        # Firmware uses sign(guz) to extend atan2 range past ±90°; angles beyond
+        # ±90° only occur when guz < 0 (device past vertical).
+        guz_ux = guz_mag if (abs(pitch) <= 90.0 and abs(roll) <= 90.0) else -guz_mag
 
-        # Single axis-angle rotation derived from the gravity vector — no gimbal lock.
-        # Two sequential glRotatef (Euler angles) flip the model past 90° because the
-        # second rotation axis is in the already-rotated frame.
-        #
-        # We need active rotation R s.t. R^T·n0 = n1, i.e., R takes n1 → n0, where:
-        #   n0 = (0, 0, -1)  — gravity direction when flat (screen up)
-        #   n1 = -(gux, guy, guz)/g  — current gravity direction in UX frame
-        #
-        # Rodrigues:  axis k = n1 × n0 = (guy/g, -gux/g, 0)
-        #             angle θ = atan2(√(gux²+guy²), guz)   [g cancels]
-        # OpenGL normalises the axis, so pass (guy_ux, -gux_ux, 0) unnormalised.
-        hxy = math.hypot(gux_ux, guy_ux)
-        if hxy > 1e-9:
-            glRotatef(math.degrees(math.atan2(hxy, guz_ux)), guy_ux, -gux_ux, 0.0)
-        elif guz_ux < 0:
-            glRotatef(180.0, 1.0, 0.0, 0.0)   # upside-down edge case
+        ux_y   = (-model.ux_neg_y_gl[0], -model.ux_neg_y_gl[1], -model.ux_neg_y_gl[2])
+        gux_gl = gux_ux * model.ux_x_gl[0] + guy_ux * ux_y[0]
+        guy_gl = gux_ux * model.ux_x_gl[1] + guy_ux * ux_y[1]
+        g_len  = math.sqrt(gux_gl*gux_gl + guy_gl*guy_gl + guz_ux*guz_ux)
+        new_grav = (gux_gl/g_len, guy_gl/g_len, guz_ux/g_len) if g_len > 1e-9 else (0.0, 0.0, 1.0)
+        if self._prev_grav is None:
+            self._orient_q = _quat_from_vecs(new_grav, (0.0, 0.0, 1.0))
+        else:
+            self._orient_q = _quat_normalize(_quat_mul(
+                _quat_from_vecs(new_grav, self._prev_grav), self._orient_q
+            ))
+        self._prev_grav = new_grav
+        ax, ay, az, angle = _quat_to_axis_angle(self._orient_q)
+        if angle > 1e-6:
+            glRotatef(angle, ax, ay, az)
 
         draw_box(model)
         draw_axes(model, show_ux)
 
-        # IMU vector for HUD: project UX gravity onto each IMU axis.
-        ux_g = (gux_ux, guy_ux, guz_ux)
-        ix, iy, iz = model.imu_axes_in_ux
-        ax = ix[0]*ux_g[0] + ix[1]*ux_g[1] + ix[2]*ux_g[2]
-        ay = iy[0]*ux_g[0] + iy[1]*ux_g[1] + iy[2]*ux_g[2]
-        az = iz[0]*ux_g[0] + iz[1]*ux_g[1] + iz[2]*ux_g[2]
+        # HUD IMU vector: project UX gravity onto device IMU axes.
+        if model.pitch_axis == 'X':
+            # M5StickC landscape: IMU ax = -guy, ay = gux, az = guz
+            ax, ay, az = -guy_ux, gux_ux, guz_ux
+        else:
+            # Core2 / CoreS3: UX frame = IMU frame
+            ax, ay, az = gux_ux, guy_ux, guz_ux
 
         blink_on = (pygame.time.get_ticks() // 500) % 2 == 0
         if disconnecting:
@@ -542,7 +601,8 @@ class Renderer:
             f"Pitch: {pitch:+7.2f}°  ({pitch_axis})   Roll: {roll:+7.2f}°  ({roll_axis})   g: {g:.2f}",
             f"accX: {ax:+.3f}   accY: {ay:+.3f}   accZ: {az:+.3f}",
             f"BLE: {ble_status}",
-            f"Model: {model.name}   [1/2/3] switch  [C] {'UX' if show_ux else 'IMU'} axes  [Q] quit",
+            f"BOARD (from firmware): {board_name or '(none)'}",
+            f"Model (viewer): {model.name}   [1/2/3] switch  [C] {'UX' if show_ux else 'IMU'} axes  [Q] quit",
         ]
         self._draw_hud(hud_lines)
 
@@ -561,6 +621,24 @@ class Renderer:
                 glutBitmapCharacter(GLUT_BITMAP_9_BY_15, ord(ch))
             y -= 20
         glEnable(GL_DEPTH_TEST)
+
+    def model_changed(self, model: DeviceModel):
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        gluPerspective(45.0, self.WIDTH / self.HEIGHT, 0.1, 100.0)
+
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+
+        ex, ey, ez = model.camera_eye
+        gluLookAt(ex, ey, ez, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+
+    def apply_model(self, model: DeviceModel):
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        ex, ey, ez = model.camera_eye
+        gluLookAt(ex, ey, ez, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+        self._prev_grav = None
 
     def quit(self) -> None:
         pygame.quit()
@@ -640,7 +718,7 @@ def main() -> None:
     renderer.init()
     clock = pygame.time.Clock()
 
-    auto_model    = args.model is None and not demo_mode
+    auto_model    = not demo_mode and (not args.model)
     model_idx     = (args.model - 1) if args.model is not None else 0
     model         = MODELS[model_idx]
     board_applied = False
@@ -655,15 +733,18 @@ def main() -> None:
         if toggle_axes:
             show_ux = not show_ux
         if new_model is not None:
-            model_idx     = new_model
-            model         = MODELS[model_idx]
-            board_applied = True  # manual key press overrides auto-detection
+            model_idx = new_model
+            model = MODELS[model_idx]
+            renderer.apply_model(model)
+            board_applied = True
+
         elif auto_model and not board_applied:
             with state.lock:
                 bn = state.board_name
             if bn:
-                model_idx     = BOARD_TO_MODEL.get(bn, model_idx)
-                model         = MODELS[model_idx]
+                model_idx = BOARD_TO_MODEL.get(bn, model_idx)
+                model = MODELS[model_idx]
+                renderer.apply_model(model)
                 board_applied = True
 
         with state.lock:
@@ -676,6 +757,7 @@ def main() -> None:
             error       = state.error
             retrying    = state.retrying
             retry_count = state.retry_count
+            board_name  = state.board_name
 
         if demo_mode:
             t     = pygame.time.get_ticks() / 1000.0
@@ -684,7 +766,9 @@ def main() -> None:
             g     = 1.0
 
         renderer.render(pitch, roll, g, connected, error, retrying, retry_count, demo_mode, model,
-                        pitch_axis=pitch_axis, roll_axis=roll_axis, show_ux=show_ux)
+                        pitch_axis=pitch_axis, roll_axis=roll_axis, show_ux=show_ux,
+                        board_name=board_name)
+
         clock.tick(60)
 
     if worker:

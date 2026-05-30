@@ -76,17 +76,22 @@ void ImuManager::update(DeviceState& state) {
 
     // Standard UX tilt angles for bubble display. Convention: positive = high side rises.
     // uxPitch > 0 when top rises; uxRoll > 0 when right side rises. Same for all boards.
-    state.uxPitchDeg = atan2f(guy, guz) * 57.2957795f;
-    state.uxRollDeg  = atan2f(gux, guz) * 57.2957795f;
+    // Cross-axis magnitude in the denominator keeps single-axis readings stable when the
+    // other axis is also tilted. Sign of guz extends the range to ±180°: when guz < 0 the
+    // device is past vertical, so the denominator must be negative for atan2 to map into
+    // the (90°, 180°] quadrant rather than folding back toward 0°.
+    float s = (guz < 0.0f ? -1.0f : 1.0f);
+    state.uxPitchDeg = atan2f(guy, s * sqrtf(gux*gux + guz*guz)) * 57.2957795f;
+    state.uxRollDeg  = atan2f(gux, s * sqrtf(guy*guy + guz*guz)) * 57.2957795f;
 
     // Configured pitch/roll angles (user-settable via SET_PITCHROLL, default +X/-Y).
     // Axis codes: +1=+X, -1=-X, +2=+Y, -2=-Y
     auto tilt = [&](int8_t code) -> float {
         switch (code) {
-            case  1: return atan2f( guy,  guz);  // +X: top rises = positive
-            case -1: return atan2f(-guy,  guz);  // -X
-            case  2: return atan2f(-gux,  guz);  // +Y
-            case -2: return atan2f( gux,  guz);  // -Y: right rises = positive
+            case  1: return atan2f( guy, s * sqrtf(gux*gux + guz*guz));  // +X: top rises = positive
+            case -1: return atan2f(-guy, s * sqrtf(gux*gux + guz*guz));  // -X
+            case  2: return atan2f(-gux, s * sqrtf(guy*guy + guz*guz));  // +Y
+            case -2: return atan2f( gux, s * sqrtf(guy*guy + guz*guz));  // -Y: right rises = positive
             default: return 0.0f;
         }
     };
