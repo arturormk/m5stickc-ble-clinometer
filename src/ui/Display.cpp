@@ -1,4 +1,5 @@
 #include "Display.h"
+#include <lgfx/Fonts/GFXFF/FreeSans9pt7b.h>
 #include <math.h>
 #include <time.h>
 
@@ -161,8 +162,8 @@ void Display::_drawClinometer(const DeviceState& state) {
     // In YX layout the axes are swapped, so the icons swap too.
     uint16_t pCol = _c(TFT_CYAN,   n);
     uint16_t rCol = _c(TFT_ORANGE, n);
-    int lyP  = _H *  5 / 135;
-    int lyR  = _H * 62 / 135;
+    int lyP  = _H * 14 / 135;
+    int lyR  = _H * 68 / 135;
     int icyP = lyP + 8;
     int icyR = lyR + 8;
     if (yx) {
@@ -172,25 +173,25 @@ void Display::_drawClinometer(const DeviceState& state) {
         _drawVertIcon (_sprite, icx, icyP, pCol);  // pitch → ↕ in XY layout
         _drawHorizIcon(_sprite, icx, icyR, rCol);  // roll  → ↔ in XY layout
     }
-    _sprite->setFont(&fonts::Font2);
+    _sprite->setFont(&fonts::FreeSans9pt7b);
     _sprite->setTextColor(pCol);
     _sprite->setCursor(px + 20, lyP);
     _sprite->print("Pitch");
 
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(px, _H * 25 / 135);
+    _sprite->setCursor(px, _H * 36 / 135);
     fmtAngle(abuf, sizeof(abuf), _dispPitch);
     _sprite->print(abuf);
 
-    _sprite->setFont(&fonts::Font2);
+    _sprite->setFont(&fonts::FreeSans9pt7b);
     _sprite->setTextColor(rCol);
     _sprite->setCursor(px + 20, lyR);
     _sprite->print("Roll");
 
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_WHITE, n));
-    _sprite->setCursor(px, _H * 82 / 135);
+    _sprite->setCursor(px, _H * 92 / 135);
     fmtAngle(abuf, sizeof(abuf), _dispRoll);
     _sprite->print(abuf);
 
