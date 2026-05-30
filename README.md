@@ -1214,6 +1214,20 @@ uv run pytest tests/test_newline.py
 uv run pytest tests/test_sanitize.py
 ```
 
+### BLE connection tuning (`--ble-timeout`, `--ble-retries`)
+
+On Windows, and particularly with the Core2 device, the BLE stack can be slower and less reliable than on macOS or Linux. Each test opens a fresh BLE connection, so a transient failure that would be invisible in normal use can cause a test to fail. Two pytest options control the connection behaviour:
+
+| Option | Default | Description |
+|---|---|---|
+| `--ble-timeout SECS` | `10.0` | Per-attempt connection timeout passed to the Bleak client. |
+| `--ble-retries N` | `3` | Number of connection attempts before a test session fails. A 1 s back-off is added between attempts. |
+
+```bash
+# Recommended settings for Windows / Core2
+uv run pytest --device AA:BB:CC:DD:EE:FF --ble-timeout 20 --ble-retries 5
+```
+
 ### Persistence tests (`test_persistence.py`)
 
 `tests/test_persistence.py` exercises the `PERSIST` command family and `REBOOT`. It is **excluded from the default `pytest` run** and must be invoked explicitly:

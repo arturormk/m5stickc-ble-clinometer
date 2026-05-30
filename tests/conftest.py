@@ -5,9 +5,10 @@ import os
 import pathlib
 
 import pytest
-from bleak import BleakClient
+from bleak import BleakClient, BleakError
 
 CONNECT_TIMEOUT = 10.0
+CONNECT_RETRIES = 3
 CMD_UUID  = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
 RESP_UUID = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
 
@@ -42,10 +43,28 @@ def _load_device_addr() -> str | None:
     return None
 
 
+def pytest_configure(config):
+    global CONNECT_TIMEOUT, CONNECT_RETRIES
+    t = config.getoption("--ble-timeout", default=None, skip=True)
+    r = config.getoption("--ble-retries", default=None, skip=True)
+    if t is not None:
+        CONNECT_TIMEOUT = t
+    if r is not None:
+        CONNECT_RETRIES = r
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--device", default=None, metavar="ADDR",
         help="BLE address of the M5StickC device (env M5_BLE_ADDR or .m5ctl.conf also work)",
+    )
+    parser.addoption(
+        "--ble-timeout", type=float, default=None, metavar="SECS",
+        help="BLE connection timeout in seconds (default 10.0; increase for Windows/Core2)",
+    )
+    parser.addoption(
+        "--ble-retries", type=int, default=None, metavar="N",
+        help="BLE connection retry count (default 3)",
     )
 
 
@@ -71,17 +90,26 @@ class BleSession:
             raw  = await s.send_raw(b"PING\\n")  # → b"OK PONG\\n"
     """
 
-    def __init__(self, address: str, timeout: float = CONNECT_TIMEOUT):
+    def __init__(self, address: str, timeout: float | None = None, retries: int | None = None):
         self._address = address
-        self._timeout = timeout
+        self._timeout = timeout if timeout is not None else CONNECT_TIMEOUT
+        self._retries = retries if retries is not None else CONNECT_RETRIES
         self._client: BleakClient | None = None
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     async def __aenter__(self) -> "BleSession":
-        self._client = BleakClient(self._address, timeout=self._timeout)
-        await self._client.connect()
-        await self._client.start_notify(RESP_UUID, self._on_notify)
-        return self
+        last_exc: Exception | None = None
+        for attempt in range(self._retries):
+            try:
+                self._client = BleakClient(self._address, timeout=self._timeout)
+                await self._client.connect()
+                await self._client.start_notify(RESP_UUID, self._on_notify)
+                return self
+            except BleakError as exc:
+                last_exc = exc
+                if attempt < self._retries - 1:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+        raise last_exc  # type: ignore[misc]
 
     async def __aexit__(self, *_) -> None:
         if self._client:
