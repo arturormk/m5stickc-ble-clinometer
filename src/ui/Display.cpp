@@ -206,7 +206,7 @@ void Display::_drawClinometer(const DeviceState& state) {
                      :              _c(0x0340u,  n);  // dark green
         uint16_t dim = _c(0x2104u, n);
         for (int i = 0; i <= 9; i++)
-            _sprite->fillRect(px + i * 7, _H - 3, 6, 4, lvl >= i * 10 ? col : dim);
+            _sprite->fillRect(px + i * 7, _H - 6, 6, 4, lvl >= i * 10 ? col : dim);
     }
 }
 
