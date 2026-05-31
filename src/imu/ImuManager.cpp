@@ -73,6 +73,7 @@ void ImuManager::update(DeviceState& state) {
     float gux = isStickC ?  gcy : gcx;   // UX X component (screen right)
     float guy = isStickC ? -gcx : gcy;   // UX Y component (screen up)
     float guz = gcz;                     // UX Z component (out of screen)
+    state.upsideDown = (guz < 0.0f);
 
     // Standard UX tilt angles for bubble display. Convention: positive = high side rises.
     // uxPitch > 0 when top rises; uxRoll > 0 when right side rises. Same for all boards.

@@ -51,6 +51,7 @@ struct DeviceState {
     // Standard UX tilt angles (always +X/-Y convention); used for bubble position only
     float    uxPitchDeg;
     float    uxRollDeg;
+    bool     upsideDown;    // true when guz < 0 (device in upside-down hemisphere)
     float    gravX;           // raw filtered gravity X component (device frame, before calibration)
     float    gravY;           // raw filtered gravity Y component (device frame, before calibration)
     float    accMag;          // filtered gravity vector magnitude in g (~1.0 when stationary; data quality indicator)

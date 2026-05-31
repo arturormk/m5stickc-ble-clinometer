@@ -138,11 +138,14 @@ void Display::_drawClinometer(const DeviceState& state) {
     // independent of the configured pitch/roll axes, so physical level is always shown correctly.
     // Convention: uxRoll > 0 = right side up; uxPitch > 0 = top up. Bubble moves toward the
     // high side, so bx increases with uxRoll and by decreases with uxPitch.
+    // When upside down (guz < 0) the screen appears 180°-rotated to the viewer, so both
+    // offsets are negated to keep the bubble tracking the physically high side.
     static const float kDeg2Rad  = 0.017453293f;
     static const float kSin3     = 0.052335956f; // sinf(3°)
     float bubbleScale = (float)maxR / kSin3;
-    int bx = cx + (int)(sinf(_dispUxRoll  * kDeg2Rad) * bubbleScale);
-    int by = cy - (int)(sinf(_dispUxPitch * kDeg2Rad) * bubbleScale);
+    float flipSign = state.upsideDown ? -1.0f : 1.0f;
+    int bx = cx + (int)(flipSign * sinf(_dispUxRoll  * kDeg2Rad) * bubbleScale);
+    int by = cy - (int)(flipSign * sinf(_dispUxPitch * kDeg2Rad) * bubbleScale);
     bx = constrain(bx, cx - maxR, cx + maxR);
     by = constrain(by, cy - maxR, cy + maxR);
     int dotR = maxR / 9;
