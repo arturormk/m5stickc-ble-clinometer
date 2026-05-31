@@ -129,9 +129,6 @@ Two persistent indicators appear on every screen:
 
 - **BLE dot** (top-right corner) — green when a central is connected, dark when not.
 - **Battery bar** (bottom-left of the clinometer screen) — a slim horizontal bar of up to 9 segments shows the charge level; each segment lights up for every 10% above 0%. The bar is dark green at 40% or above, dark amber at 20–39%, and dark red below 20%. In night mode all colours shift to red to preserve dark-adapted vision.
-
-The display auto-rotates 180° based on the raw IMU gravity reading. When the screen's current top edge drifts more than ~17° past vertical away from physical up, the display flips to the opposite landscape orientation and flips back once the original orientation is again more than ~17° closer to physical up. All screens and overlays rotate together.
-
 ## Button behaviour
 
 | Button | Short press | Long press (≥2 s) |
