@@ -77,6 +77,7 @@ async def test_newline_flag_is_sticky_within_connection(device_addr):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+@pytest.mark.ble_reconnect
 async def test_newline_flag_resets_on_reconnect(device_addr):
     """A new connection should start without the newline flag set."""
     # First connection: activate newline mode
@@ -121,6 +122,7 @@ async def test_newline_stream_notifications_carry_newline(device_addr):
 
 
 @pytest.mark.asyncio
+@pytest.mark.ble_reconnect
 async def test_no_newline_stream_notifications_have_no_newline(device_addr):
     """TILT stream notifications should NOT end with \\n in plain (no-\\n) mode."""
     async with BleSession(device_addr) as s:
