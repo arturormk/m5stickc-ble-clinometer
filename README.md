@@ -34,6 +34,48 @@ A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices 
 | PMIC | AXP2101 (battery management) |
 | Communication | Bluetooth Low Energy (BLE 4.2) |
 
+## Installing from a pre-built release
+
+Pre-built firmware binaries for the **M5StickC Plus 2** are attached to every [GitHub Release](../../releases). Download the file named `firmware-vX.Y.Z-m5stickc-plus2.bin` and flash it with one of the methods below. No toolchain or build environment is required.
+
+For all other supported boards (Core2, CoreS3, Grey) build from source — see [Building](#building).
+
+### Method 1 — ESP Web Flasher (no install required)
+
+Works in **Chrome or Edge** on Windows, macOS, and Linux (requires the browser to support WebSerial).
+
+1. Connect the M5StickC Plus 2 to your computer via USB.
+2. Open [https://espressif.github.io/esptool-js/](https://espressif.github.io/esptool-js/) in Chrome or Edge.
+3. Click **Connect**, select the device's serial port, and click **Connect** again.
+4. Under **Flash Address**, enter `0x0000`.
+5. Click **Choose File** and select the downloaded `.bin`.
+6. Click **Program** and wait for the progress bar to complete (~30 seconds).
+7. Press the reset button on the device (or power-cycle it). The clinometer screen appears.
+
+### Method 2 — M5Burner (M5Stack GUI tool)
+
+[M5Burner](https://docs.m5stack.com/en/download) is M5Stack's official desktop flashing tool. It runs on Windows, macOS, and Linux.
+
+1. Install and open M5Burner.
+2. Click **…** (browse) in the top-right and select the downloaded `.bin`.
+3. Select the correct COM/serial port and set baud rate to **921600**.
+4. Click **Burn** and wait for the flash to complete.
+5. The device resets automatically when done.
+
+### Method 3 — esptool (command line)
+
+If you have Python installed, `esptool` can be used directly.
+
+```bash
+pip install esptool
+python -m esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash 0x0000 firmware-vX.Y.Z-m5stickc-plus2.bin
+```
+
+Replace `/dev/ttyUSB0` with the correct port (`COMx` on Windows, `/dev/cu.usbserial-*` on macOS).
+
+---
+
 ## Building
 
 This is a [PlatformIO](https://platformio.org/) project targeting the Arduino framework. Use the `flash` script to build and upload in one step:
