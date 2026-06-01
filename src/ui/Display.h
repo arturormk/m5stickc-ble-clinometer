@@ -16,6 +16,8 @@ private:
     float        _dispRoll    = 0.0f;  // display-smoothed configured roll
     float        _dispUxPitch = 0.0f;  // display-smoothed standard UX pitch (for bubble)
     float        _dispUxRoll  = 0.0f;  // display-smoothed standard UX roll  (for bubble)
+    DeviceState  _lastClinoState{};
+    bool         _hasLastClinoState = false;
 
     void _drawClinometer(const DeviceState& state);
     void _drawTime(const DeviceState& state);

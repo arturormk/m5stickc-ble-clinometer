@@ -105,9 +105,12 @@ async def test_newline_stream_notifications_carry_newline(device_addr):
         pong = await s.send_raw(b"PING\n")
         assert pong.endswith(b"\n")
 
-        # Start stream
-        start_raw = await s.send_raw(b"START_STREAM 200\n")
-        assert start_raw.rstrip(b"\r\n") == b"OK STREAM 200"
+        # Start stream.  Use send_no_wait so we control response consumption:
+        # OK STREAM and the first TILT notifications may arrive in any order.
+        await s.send_no_wait("START_STREAM 200\n")  # \n keeps newline flag active
+        pkt = await s.recv_raw(timeout=1.0)
+        while not pkt.rstrip(b"\r\n").startswith(b"OK STREAM"):
+            pkt = await s.recv_raw(timeout=1.0)
 
         # Each TILT notification must carry \\n
         for _ in range(3):
@@ -126,7 +129,12 @@ async def test_newline_stream_notifications_carry_newline(device_addr):
 async def test_no_newline_stream_notifications_have_no_newline(device_addr):
     """TILT stream notifications should NOT end with \\n in plain (no-\\n) mode."""
     async with BleSession(device_addr) as s:
-        await s.send_raw(b"START_STREAM 200")  # no \\n → flag not set
+        # Use send_no_wait so we control response consumption: OK STREAM and
+        # the first TILT notifications may arrive in any order.
+        await s.send_no_wait("START_STREAM 200")  # no \\n → flag not set
+        pkt = await s.recv_raw(timeout=1.0)
+        while not pkt.startswith(b"OK STREAM"):
+            pkt = await s.recv_raw(timeout=1.0)
 
         for _ in range(3):
             pkt = await s.recv_raw(timeout=1.0)

@@ -26,6 +26,25 @@ void Display::update(const DeviceState& state) {
     if ((now - _lastRefreshMs) < interval) return;
     _lastRefreshMs = now;
 
+    if (state.screenIndex == SCREEN_CLINOMETER && _hasLastClinoState) {
+        bool pitchSame = fabsf(state.pitchDeg - _lastClinoState.pitchDeg) < 0.1f;
+        bool rollSame  = fabsf(state.rollDeg  - _lastClinoState.rollDeg)  < 0.1f;
+        if (pitchSame && rollSame
+                && state.batteryLevel == _lastClinoState.batteryLevel
+                && state.bleConnected == _lastClinoState.bleConnected
+                && state.nightMode    == _lastClinoState.nightMode
+                && state.imuAvailable == _lastClinoState.imuAvailable
+                && state.upsideDown   == _lastClinoState.upsideDown
+                && state.pitchAxis    == _lastClinoState.pitchAxis
+                && state.rollAxis     == _lastClinoState.rollAxis) {
+            return;
+        }
+    }
+    if (state.screenIndex == SCREEN_CLINOMETER) {
+        _lastClinoState    = state;
+        _hasLastClinoState = true;
+    }
+
     _sprite->fillScreen(TFT_BLACK);
 
     switch (state.screenIndex) {
