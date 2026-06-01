@@ -229,7 +229,10 @@ static int parseMelody(const char* str, MelodyNote* notes, int maxNotes, const c
 
 class BleServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer*) override {
-        if (s_state) s_state->bleConnected = true;
+        if (s_state) {
+            s_state->bleConnected = true;
+            s_state->lastBleCommandMs = millis();
+        }
     }
     void onDisconnect(BLEServer*) override {
         if (s_state) {
@@ -282,6 +285,7 @@ static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0
 class BleCmdCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* pChar) override {
         if (!s_state) return;
+        s_state->lastBleCommandMs = millis();
 
         // Copy value to local buffer (pChar->getValue() is a std::string)
         std::string val = pChar->getValue();

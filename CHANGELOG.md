@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freeing CPU bandwidth for BLE heartbeats (relevant on large-screen devices such
   as Core2 and Grey) and reducing average current draw on all devices.
   Proposed by [@senshu-hiro2](https://github.com/hiroyukisenshu-commits).
+- Auto-dim: the backlight drops to a low level (`BRIGHTNESS_DIM = 30`) after
+  60 seconds with no BLE command received **and** no tilt change exceeding 5° on
+  either axis. Full brightness (`BRIGHTNESS_FULL = 128`) resumes immediately on
+  the next BLE command or when the device is moved past the threshold. While tilt
+  streaming is active the display is kept at full brightness regardless of elapsed
+  time. Night mode sets its own fixed dim level (`BRIGHTNESS_NIGHT = 40`) and
+  bypasses the inactivity logic entirely.
 
 ### Changed
 - CI: add `workflow_dispatch` trigger so releases can be created manually from
@@ -24,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - README: removed a stale paragraph describing auto-rotation behaviour that was
   no longer accurate.
+
+### Removed
+- Shutdown melody in `PowerManager::deepSleep()`: the blocking `tone()`+`delay()`
+  sequence that played four descending notes before powering off stopped working
+  after the migration to M5Unified. The device now powers off silently.
 
 ## [1.0.0] — 2026-05-31
 

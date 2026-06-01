@@ -66,6 +66,8 @@ void setup() {
     strcpy(g_state.altText, "---");
     strcpy(g_state.azText,  "---");
 
+    g_state.lastBleCommandMs = millis();
+
     g_power.begin();
     g_buttons.begin();
     g_display.begin();

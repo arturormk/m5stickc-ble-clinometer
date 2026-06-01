@@ -7,7 +7,8 @@ void Display::begin() {
     bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
                   || M5.getBoard() == m5::board_t::board_M5StickCPlus);
     M5.Display.setRotation(isStickC ? 3 : 1);
-    M5.Display.setBrightness(128);
+    M5.Display.setBrightness(BRIGHTNESS_FULL);
+    _lastTiltActivityMs = millis();
     _W = M5.Display.width();
     _H = M5.Display.height();
     _sprite = new LGFX_Sprite(&M5.Display);
@@ -19,7 +20,36 @@ void Display::setBrightness(uint8_t val) {
     M5.Display.setBrightness(val);
 }
 
+void Display::_updateBrightness(const DeviceState& state) {
+    uint32_t now = millis();
+
+    // Track tilt activity: reset clock whenever angle moves beyond threshold
+    if (fabsf(state.pitchDeg - _dimPitchRef) > DIM_STABLE_DEG ||
+        fabsf(state.rollDeg  - _dimRollRef)  > DIM_STABLE_DEG) {
+        _dimPitchRef        = state.pitchDeg;
+        _dimRollRef         = state.rollDeg;
+        _lastTiltActivityMs = now;
+    }
+
+    uint8_t target;
+    if (state.nightMode) {
+        target = BRIGHTNESS_NIGHT;
+    } else if (state.streamEnabled
+               || (now - state.lastBleCommandMs) < DIM_TIMEOUT_MS
+               || (now - _lastTiltActivityMs)    < DIM_TIMEOUT_MS) {
+        target = BRIGHTNESS_FULL;
+    } else {
+        target = BRIGHTNESS_DIM;
+    }
+
+    if (target != _currentBrightness) {
+        setBrightness(target);
+        _currentBrightness = target;
+    }
+}
+
 void Display::update(const DeviceState& state) {
+    _updateBrightness(state);
     uint32_t now = millis();
     uint32_t interval = (state.screenIndex == SCREEN_CLINOMETER ||
                          state.screenIndex == SCREEN_MESSAGE) ? 100 : 200;

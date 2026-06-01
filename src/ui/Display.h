@@ -9,6 +9,12 @@ public:
     void setBrightness(uint8_t val);
 
 private:
+    static constexpr uint8_t  BRIGHTNESS_FULL  = 128;
+    static constexpr uint8_t  BRIGHTNESS_DIM   = 30;
+    static constexpr uint8_t  BRIGHTNESS_NIGHT = 40;
+    static constexpr uint32_t DIM_TIMEOUT_MS   = 60000;
+    static constexpr float    DIM_STABLE_DEG   = 5.0f;
+
     LGFX_Sprite* _sprite = nullptr;
     uint32_t     _lastRefreshMs = 0;
     int          _W = 0, _H = 0;   // screen dimensions, set in begin()
@@ -19,6 +25,13 @@ private:
     DeviceState  _lastClinoState{};
     bool         _hasLastClinoState = false;
 
+    // Dim state
+    float    _dimPitchRef        = 0.0f;
+    float    _dimRollRef         = 0.0f;
+    uint32_t _lastTiltActivityMs = 0;
+    uint8_t  _currentBrightness  = BRIGHTNESS_FULL;
+
+    void _updateBrightness(const DeviceState& state);
     void _drawClinometer(const DeviceState& state);
     void _drawTime(const DeviceState& state);
     void _drawRADec(const DeviceState& state);
