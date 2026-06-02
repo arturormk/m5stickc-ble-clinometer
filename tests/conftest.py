@@ -4,10 +4,12 @@ import asyncio
 import inspect
 import os
 import pathlib
+import sys
 from typing import ClassVar
 
 import pytest
 from bleak import BleakClient, BleakError
+from bleak.exc import BleakDeviceNotFoundError
 
 CONNECT_TIMEOUT = 10.0
 CONNECT_RETRIES = 3
@@ -187,6 +189,23 @@ class BleSession:
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._borrowed = False
 
+    async def _do_connect(self) -> None:
+        """Connect, using the BlueZ D-Bus cache on Linux to skip re-scanning.
+
+        On Linux/BlueZ, once a device disconnects it may stop advertising, so a
+        fresh BleakScanner.find_device_by_address() call never finds it again.
+        dangerous_use_bleak_cache=True uses BlueZ's cached object path instead.
+        On a cold start (no cache entry yet) it falls back to a normal scan.
+        """
+        if sys.platform == "linux":
+            try:
+                await self._client.connect(dangerous_use_bleak_cache=True)
+                return
+            except BleakDeviceNotFoundError:
+                # No cache entry yet — recreate client and do a full scan.
+                self._client = BleakClient(self._address, timeout=self._timeout)
+        await self._client.connect()
+
     async def __aenter__(self) -> "BleSession":
         if BleSession._shared is not None and BleSession._shared is not self:
             # Keep-alive mode: borrow the module's shared connection.
@@ -200,7 +219,7 @@ class BleSession:
         for attempt in range(self._retries):
             try:
                 self._client = BleakClient(self._address, timeout=self._timeout)
-                await self._client.connect()
+                await self._do_connect()
                 await self._client.start_notify(RESP_UUID, self._on_notify)
                 return self
             except BleakError as exc:
@@ -266,7 +285,7 @@ class BleSession:
         for attempt in range(self._retries):
             try:
                 self._client = BleakClient(self._address, timeout=self._timeout)
-                await self._client.connect()
+                await self._do_connect()
                 await self._client.start_notify(RESP_UUID, self._on_notify)
                 return
             except BleakError as exc:

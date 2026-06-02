@@ -166,9 +166,9 @@ STATUS_UUID = "7d91b003-8f3b-4b63-b6a4-5d1e6b7a1000"
 
 @asynccontextmanager
 async def _connect(address: str, timeout: float, retries: int = 3):
-    client = BleakClient(address, timeout=timeout)
     last_exc: Exception | None = None
     for attempt in range(retries):
+        client = BleakClient(address, timeout=timeout)
         try:
             await client.connect()
             break
@@ -184,6 +184,21 @@ async def _connect(address: str, timeout: float, retries: int = 3):
         await client.disconnect()
 
 
+async def _start_notify(client, uuid: str, callback, retries: int = 3) -> None:
+    if sys.platform == "win32":
+        await asyncio.sleep(0.1)  # WinRT backend needs a moment after connect
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            await client.start_notify(uuid, callback)
+            return
+        except OSError as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                await asyncio.sleep(0.2 * (attempt + 1))
+    raise last_exc  # type: ignore[misc]
+
+
 async def send_and_receive(address: str, command: str, timeout: float) -> str:
     """Connect, send one command, wait for the notify response, disconnect."""
     loop = asyncio.get_running_loop()
@@ -194,7 +209,7 @@ async def send_and_receive(address: str, command: str, timeout: float) -> str:
             fut.set_result(data.decode("utf-8", errors="replace").strip())
 
     async with _connect(address, CONNECT_TIMEOUT) as client:
-        await client.start_notify(RESP_UUID, on_notify)
+        await _start_notify(client, RESP_UUID, on_notify)
         await client.write_gatt_char(CMD_UUID, command.encode("utf-8"), response=False)
         try:
             return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
@@ -216,7 +231,7 @@ async def cmd_help(address: str, timeout: float) -> None:
             done.set_result(None)
 
     async with _connect(address, CONNECT_TIMEOUT) as client:
-        await client.start_notify(RESP_UUID, on_notify)
+        await _start_notify(client, RESP_UUID, on_notify)
         await client.write_gatt_char(CMD_UUID, b"HELP", response=False)
         try:
             await asyncio.wait_for(asyncio.shield(done), timeout=timeout)
@@ -235,7 +250,7 @@ async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
 
     print(f"Listening on {address} — Ctrl+C to stop", file=sys.stderr)
     async with _connect(address, CONNECT_TIMEOUT) as client:
-        await client.start_notify(RESP_UUID, on_notify)
+        await _start_notify(client, RESP_UUID, on_notify)
         if stream_ms is not None:
             period = max(100, stream_ms)
             await client.write_gatt_char(
