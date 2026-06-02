@@ -986,11 +986,12 @@ uv sync --group tools    # include pygame and PyOpenGL for the 3D viewer
 `tools/m5ctl` is a Python 3 command-line client for the BLE interface.
 
 ```
-usage: m5ctl [-h] [-d ADDR_OR_NAME] [-t SEC] COMMAND ...
+usage: m5ctl [-h] [-d ADDR_OR_NAME] [-t SEC] [-p] COMMAND ...
 
 options:
   -d ADDR_OR_NAME   Device address or config name. Priority: --device > $M5_BLE_ADDR > default_device > first conf entry
   -t SEC            seconds to wait for a response (default: 5)
+  -p, --print-cmd   print the raw BLE command string to stderr before sending
 ```
 
 | Command | Arguments | Description |
@@ -1029,6 +1030,7 @@ options:
 | `persist-clear` | | Invalidate stored NVM settings with a single flash write |
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
 | `reboot` | | Software-reset the device |
+| `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
 
 Examples:
 
@@ -1071,6 +1073,9 @@ uv run tools/m5ctl persist-restore        # re-enable and apply stored NVM value
 uv run tools/m5ctl reboot                 # software-reset the device
 uv run tools/m5ctl listen --stream 500
 uv run tools/m5ctl listen
+uv run tools/m5ctl -p ping                # show the raw BLE command before sending
+uv run tools/m5ctl exec commands.txt     # send commands from a file
+printf 'PING\nGET_TILT\n' | uv run tools/m5ctl exec -   # send from stdin
 ```
 
 ### Device address configuration
@@ -1197,6 +1202,57 @@ uv run tools/m5ctl set-timezone LST                   # sidereal mode
 **Abbreviation resolution:** Known abbreviations (`CET`, `CEST`, `EST`, `EDT`, `PST`, `PDT`, `JST`, `IST`, `AEST`, …) are mapped to their **conventional fixed offsets** — `CET` is always `+01:00`, `CEST` is always `+02:00`, regardless of the current date. This is intentional: the abbreviation itself encodes the expected offset. IANA zone names (e.g. `Europe/Madrid`, `America/New_York`) resolve to the **current** UTC offset of that zone, including DST.
 
 **Negative offsets:** argparse treats arguments starting with `-` as flags. The strictly correct POSIX way to pass a negative offset on a Linux terminal is `-- -07:00 PST` (the `--` signals end of options). The `~` alias (`~07:00 PST`) achieves the same result and is more portable across terminals (Windows CMD, PowerShell, macOS) where `--` may not be recognised or may behave differently; m5ctl translates `~` to `-` before sending the BLE command.
+
+### `exec` — batch commands from a file or stdin
+
+`exec` reads raw BLE commands from a file (or from stdin when the argument is `-`) and sends them to the device one at a time over a **single BLE connection**. Blank lines and lines starting with `#` are ignored, so script files can include comments.
+
+```bash
+uv run tools/m5ctl exec setup.txt       # send every command in setup.txt
+uv run tools/m5ctl exec -               # read from stdin until EOF
+```
+
+A typical use case is a setup script that sets the clock, longitude, and pitch/roll axis assignment in one shot and then persists everything. Embedding `SET_TIME` in a shell here-string lets the host generate the current timestamp at the moment the script runs. The `+3 seconds` offset in the `date` call compensates for the time it takes `m5ctl` to establish the BLE connection:
+
+```bash
+#!/usr/bin/env bash
+set -e
+{
+  echo "SET_TIME $(date -d '+3 seconds' '+%Y-%m-%dT%H:%M:%S%:z %Z')"
+  echo "SET_LONGITUDE -3.6875"
+  echo "SET_PITCHROLL -Y,-X"
+  echo "PERSIST"
+} | uv run tools/m5ctl exec -
+```
+
+`date -d '+3 seconds'` is evaluated once by the shell when the brace group opens — the timestamp is baked into the stream before the pipe starts, so the 3-second lead is accurate regardless of how quickly BLE connects. `%:z` produces the colon-separated UTC offset (`+02:00`); `%Z` appends the timezone abbreviation (`CEST`). Both are GNU `date` extensions available on any standard Linux system.
+
+Add `-p` / `--print-cmd` to echo each command to stderr as it is sent — useful for verifying what was sent or for debugging a script:
+
+```bash
+{
+  echo "SET_TIME $(date -d '+3 seconds' '+%Y-%m-%dT%H:%M:%S%:z %Z')"
+  echo "SET_LONGITUDE -3.6875"
+  echo "SET_PITCHROLL -Y,-X"
+  echo "PERSIST"
+} | uv run tools/m5ctl -p exec -
+```
+
+#### PowerShell equivalent
+
+PowerShell does not expose short timezone abbreviations (`CEST`, `CET`, …), so the label is hardcoded in the script. `ToString("zzz")` produces the colon-form UTC offset (`+02:00`) that the device needs to store true UTC.
+
+```powershell
+$t = (Get-Date).AddSeconds(3)
+$ts = $t.ToString("yyyy-MM-ddTHH:mm:sszzz")   # e.g. 2026-06-02T21:17:02+02:00
+
+@"
+SET_TIME $ts CEST
+SET_LONGITUDE -3.6875
+SET_PITCHROLL -Y,-X
+PERSIST
+"@ | uv run tools/m5ctl exec -
+```
 
 ### tests/3d_model.py — real-time 3D orientation viewer
 

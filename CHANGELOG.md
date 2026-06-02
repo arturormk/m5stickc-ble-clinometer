@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **m5ctl 1.1** — `exec FILE` subcommand: reads raw BLE commands from a file
+  (or stdin when `FILE` is `-`), sends them one at a time over a single BLE
+  connection, and prints each response. Blank lines and lines starting with `#`
+  are silently skipped, allowing comments in script files.
+- **m5ctl 1.1** — `-p` / `--print-cmd` global flag: prints the raw BLE command
+  string to stderr (prefixed with `>>>`) before each write. Works for all
+  subcommands including `exec`.
 - Clinometer dirty-check: `Display::update()` now skips the SPI DMA flush on
   `SCREEN_CLINOMETER` when no display-relevant state has changed since the last
   render — angles within 0.1°, and identical values for `batteryLevel`,
