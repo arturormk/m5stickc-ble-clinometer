@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **m5ctl** — `script FILE` subcommand: reads m5ctl command invocations from a
+  file (or stdin when `FILE` is `-`), one per line, and runs them all over a
+  single BLE connection. Each line is parsed as m5ctl arguments
+  (`set-time-now --timezone CEST`, `beep C4`, …) rather than raw BLE strings,
+  so high-level commands such as `set-time-now` work directly in script files
+  without shell date formatting. Blank lines and `#` comments are ignored.
+  Non-batchable commands (`listen`, `exec`, `scan`, `list`, …) produce a
+  warning and are skipped rather than aborting the run.
 - **m5ctl 1.1** — `exec FILE` subcommand: reads raw BLE commands from a file
   (or stdin when `FILE` is `-`), sends them one at a time over a single BLE
   connection, and prints each response. Blank lines and lines starting with `#`

@@ -6,6 +6,7 @@ import argparse
 import os
 import re
 import pathlib
+import shlex
 import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -312,7 +313,16 @@ def run(coro) -> None:
         pass
 
 
+_script_commands: list[str] | None = None
+
+
 def do_send(args, command: str) -> None:
+    global _script_commands
+    if _script_commands is not None:
+        if args.print_cmd:
+            print(f">>> {command}", file=sys.stderr)
+        _script_commands.append(command)
+        return
     async def go():
         if args.print_cmd:
             print(f">>> {command}", file=sys.stderr)
@@ -385,12 +395,37 @@ def _tz_to_offset_str(name: str) -> str:
     return f"{sign}{h:02d}:{m:02d}"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="m5ctl",
-        description="Control the M5StickC NexStar clinometer over BLE.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+def _preprocess_argv(argv: list[str]) -> list[str]:
+    # argparse treats tokens starting with '-' as flags.
+    # For set-timezone: rewrite -HH:MM → ~HH:MM; handler converts back.
+    # For set-pitchroll: rewrite -X,-Y (etc.) → ~X,-Y when the axes arg starts with '-'.
+    argv = list(argv)
+    try:
+        i = argv.index("set-timezone")
+        if i + 1 < len(argv) and re.fullmatch(r'-\d\d:\d\d', argv[i + 1]):
+            argv[i + 1] = '~' + argv[i + 1][1:]
+    except ValueError:
+        pass
+    try:
+        i = argv.index("set-pitchroll")
+        # Rewrite -X or -Y (leading negative axis) to ~X / ~Y so argparse does not
+        # mistake it for an option flag. Only matches actual axis specs, not -h/--help.
+        if i + 1 < len(argv) and re.fullmatch(r'-[XYxy](,[+\-~XYxy]+)?', argv[i + 1]):
+            argv[i + 1] = '~' + argv[i + 1][1:]
+    except ValueError:
+        pass
+    return argv
+
+
+# ---------------------------------------------------------------------------
+# Parser (module-level so cmd_script can reuse it for per-line parsing)
+# ---------------------------------------------------------------------------
+
+parser = argparse.ArgumentParser(
+    prog="m5ctl",
+    description="Control the M5StickC NexStar clinometer over BLE.",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="""
 examples:
   m5ctl version
   m5ctl list                # show configured devices with reachability (1-second scan)
@@ -426,7 +461,7 @@ examples:
   m5ctl night-mode off     # restore normal colors
   m5ctl get-pitchroll                   # show current pitch/roll axis assignment
   m5ctl set-pitchroll +X,+Y            # default: pitch=+X (top rises), roll=+Y (right backward rises)
-  m5ctl set-pitchroll ~X,+Y            # pitch=-X  (use ~ for negative to avoid flag conflict)
+  m5ctl set-pitchroll ~X,+Y            # pitch=-X  (use ~ for negative to avoid argparse flag conflicts)
   m5ctl set-pitchroll +X,-Y            # flip roll sign
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
@@ -437,206 +472,208 @@ examples:
   m5ctl reboot             # software-reset the device
   m5ctl listen             # print all notifications (events, screen changes…)
   m5ctl help               # list all accepted BLE commands
-        """,
-    )
-    parser.add_argument(
-        "-d", "--device",
-        default=None,
-        metavar="ADDR_OR_NAME",
-        help=(
-            f"BLE address or config name (e.g. 'main'). "
-            f"Priority: --device > ${_ENV_VAR} > default_device > first conf entry. "
-            f"Named: 'device.main = MAC'. Default: 'default_device = main'."
-        ),
-    )
-    parser.add_argument(
-        "-t", "--timeout",
-        type=float,
-        default=5.0,
-        metavar="SEC",
-        help="seconds to wait for a response (default: 5)",
-    )
-    parser.add_argument(
-        "-p", "--print-cmd",
-        action="store_true",
-        help="print the BLE command string to stderr before sending",
-    )
+  m5ctl script setup.m5s   # run m5ctl commands from a file over one BLE connection
+  m5ctl script -           # read m5ctl commands from stdin
+    """,
+)
+parser.add_argument(
+    "-d", "--device",
+    default=None,
+    metavar="ADDR_OR_NAME",
+    help=(
+        f"BLE address or config name (e.g. 'main'). "
+        f"Priority: --device > ${_ENV_VAR} > default_device > first conf entry. "
+        f"Named: 'device.main = MAC'. Default: 'default_device = main'."
+    ),
+)
+parser.add_argument(
+    "-t", "--timeout",
+    type=float,
+    default=5.0,
+    metavar="SEC",
+    help="seconds to wait for a response (default: 5)",
+)
+parser.add_argument(
+    "-p", "--print-cmd",
+    action="store_true",
+    help="print the BLE command string to stderr before sending",
+)
 
-    sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
-    sub.required = True
+sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
+sub.required = True
 
-    sub.add_parser("list",    help="List configured devices with reachability status")
-    sub.add_parser("version", help="Show m5ctl version")
+sub.add_parser("list",    help="List configured devices with reachability status")
+sub.add_parser("version", help="Show m5ctl version")
 
-    # --- simple query commands ---
-    sub.add_parser("help",        help="List all accepted BLE commands")
-    sub.add_parser("ping",        help="Ping the device")
-    sub.add_parser("tilt",        help="Get current pitch/roll angles and gravity magnitude (g)")
-    p = sub.add_parser("calibrate",
-                       help="Calibrate from current orientation, or restore a saved reference vector")
-    p.add_argument("ref", nargs="*", metavar="FLOAT",
-                   help="Optional saved reference: gx gy gz from a previous CALIBRATE response")
-    sub.add_parser("calibrate-reset", help="Remove calibration and restore hardware reference")
-    sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
-    sub.add_parser("get-board",   help="Get the board type identifier")
-    sub.add_parser("get-time",    help="Get current device time")
-    sub.add_parser("get-radec",   help="Get stored RA/Dec values")
-    sub.add_parser("get-altaz",   help="Get stored Alt/Az values")
-    sub.add_parser("get-msg",     help="Get current message state")
-    sub.add_parser("cancel-msg",  help="Cancel the active message immediately")
-    sub.add_parser("stop-stream", help="Disable tilt streaming")
-    p = sub.add_parser("listen",   help="Print all BLE notifications (Ctrl+C to stop)")
-    p.add_argument("--stream", type=int, metavar="MS",
-                   help="Start tilt streaming at this period (ms) before listening")
-    p = sub.add_parser("scan",    help="Scan for nearby BLE devices")
-    p.add_argument(
-        "--timeout", type=float, default=3.0, metavar="SEC",
-        help="Scanning duration in seconds (default: 3)",
-    )
-    p = sub.add_parser("exec",    help="Send BLE commands from a file or stdin line by line")
-    p.add_argument("file", metavar="FILE",
-                   help="file of BLE commands, one per line (use - for stdin)")
+# --- simple query commands ---
+sub.add_parser("help",        help="List all accepted BLE commands")
+sub.add_parser("ping",        help="Ping the device")
+sub.add_parser("tilt",        help="Get current pitch/roll angles and gravity magnitude (g)")
+p = sub.add_parser("calibrate",
+                   help="Calibrate from current orientation, or restore a saved reference vector")
+p.add_argument("ref", nargs="*", metavar="FLOAT",
+               help="Optional saved reference: gx gy gz from a previous CALIBRATE response")
+sub.add_parser("calibrate-reset", help="Remove calibration and restore hardware reference")
+sub.add_parser("status",      help="Get device status (screen, BLE, battery, stream)")
+sub.add_parser("get-board",   help="Get the board type identifier")
+sub.add_parser("get-time",    help="Get current device time")
+sub.add_parser("get-radec",   help="Get stored RA/Dec values")
+sub.add_parser("get-altaz",   help="Get stored Alt/Az values")
+sub.add_parser("get-msg",     help="Get current message state")
+sub.add_parser("cancel-msg",  help="Cancel the active message immediately")
+sub.add_parser("stop-stream", help="Disable tilt streaming")
+p = sub.add_parser("listen",   help="Print all BLE notifications (Ctrl+C to stop)")
+p.add_argument("--stream", type=int, metavar="MS",
+               help="Start tilt streaming at this period (ms) before listening")
+p = sub.add_parser("scan",    help="Scan for nearby BLE devices")
+p.add_argument(
+    "--timeout", type=float, default=3.0, metavar="SEC",
+    help="Scanning duration in seconds (default: 3)",
+)
+p = sub.add_parser("exec",    help="Send BLE commands from a file or stdin line by line")
+p.add_argument("file", metavar="FILE",
+               help="file of BLE commands, one per line (use - for stdin)")
+p = sub.add_parser("script",  help="Run m5ctl commands from a file over one BLE connection")
+p.add_argument("file", metavar="FILE",
+               help="script file with m5ctl commands, one per line (use - for stdin)")
 
-    # --- parameterised commands ---
-    p = sub.add_parser("set-time",
-                       help="Set device clock from ISO-8601 string with optional timezone label")
-    p.add_argument("time", help="e.g. 2026-05-14T12:30:00Z  or  2026-05-14T12:30:00+01:00")
-    p.add_argument("tz",   nargs="?",
-                   help="Optional timezone label e.g. CET, EST (use when time has no offset suffix)")
+# --- parameterised commands ---
+p = sub.add_parser("set-time",
+                   help="Set device clock from ISO-8601 string with optional timezone label")
+p.add_argument("time", help="e.g. 2026-05-14T12:30:00Z  or  2026-05-14T12:30:00+01:00")
+p.add_argument("tz",   nargs="?",
+               help="Optional timezone label e.g. CET, EST (use when time has no offset suffix)")
 
-    p = sub.add_parser("set-time-now",
-                       help="Set device clock to the current host time")
-    grp = p.add_mutually_exclusive_group()
-    grp.add_argument("--utc",      action="store_true",
-                     help="Use UTC time")
-    grp.add_argument("--local",    action="store_true",
-                     help="Use host local time (default)")
-    grp.add_argument("--timezone", metavar="TZ",
-                     help="Use named timezone, e.g. Europe/Madrid or CEST")
-    p.add_argument("--label", default="", metavar="STR",
-                   help="Override display label on device (e.g. JST)")
-    p.add_argument("--offset", type=int, default=3, metavar="N",
-                   help="Seconds added for BLE latency compensation (default: 3)")
+p = sub.add_parser("set-time-now",
+                   help="Set device clock to the current host time")
+grp = p.add_mutually_exclusive_group()
+grp.add_argument("--utc",      action="store_true",
+                 help="Use UTC time")
+grp.add_argument("--local",    action="store_true",
+                 help="Use host local time (default)")
+grp.add_argument("--timezone", metavar="TZ",
+                 help="Use named timezone, e.g. Europe/Madrid or CEST")
+p.add_argument("--label", default="", metavar="STR",
+               help="Override display label on device (e.g. JST)")
+p.add_argument("--offset", type=int, default=3, metavar="N",
+               help="Seconds added for BLE latency compensation (default: 3)")
 
-    p = sub.add_parser("set-timezone",
-                       help="Set display timezone/mode without changing the clock")
-    p.add_argument("spec",
-                   help=(
-                       "Offset (+HH:MM or -HH:MM), UTC, LST/GST for sidereal, "
-                       "or a timezone abbreviation/IANA name (CET, JST, Europe/Madrid). "
-                       "Use ~ instead of - for negative offsets (e.g. ~05:00)."
-                   ))
-    p.add_argument("label", nargs="?", default="",
-                   help="Optional display label override; defaults to spec when spec is a TZ name")
+p = sub.add_parser("set-timezone",
+                   help="Set display timezone/mode without changing the clock")
+p.add_argument("spec",
+               help=(
+                   "Offset (+HH:MM or -HH:MM), UTC, LST/GST for sidereal, "
+                   "or a timezone abbreviation/IANA name (CET, JST, Europe/Madrid). "
+                   "Use ~ instead of - for negative offsets (e.g. ~05:00)."
+               ))
+p.add_argument("label", nargs="?", default="",
+               help="Optional display label override; defaults to spec when spec is a TZ name")
 
-    p = sub.add_parser("set-longitude",
-                       help="Set observer longitude for sidereal time computation")
-    p.add_argument("degrees", type=float,
-                   help="Longitude in degrees east (negative = west), range ±180")
+p = sub.add_parser("set-longitude",
+                   help="Set observer longitude for sidereal time computation")
+p.add_argument("degrees", type=float,
+               help="Longitude in degrees east (negative = west), range ±180")
 
-    p = sub.add_parser("set-radec", help="Set RA/Dec display values")
-    p.add_argument("ra",  help="e.g. 12:34:56")
-    p.add_argument("dec", help="e.g. +07:08:09")
+p = sub.add_parser("set-radec", help="Set RA/Dec display values")
+p.add_argument("ra",  help="e.g. 12:34:56")
+p.add_argument("dec", help="e.g. +07:08:09")
 
-    p = sub.add_parser("set-altaz", help="Set Alt/Az display values")
-    p.add_argument("alt", help="e.g. +43.2")
-    p.add_argument("az",  help="e.g. 181.7")
+p = sub.add_parser("set-altaz", help="Set Alt/Az display values")
+p.add_argument("alt", help="e.g. +43.2")
+p.add_argument("az",  help="e.g. 181.7")
 
-    p = sub.add_parser("show-msg",
-                       help="Display a message (show-msg <seconds|inf> <text>)")
-    p.add_argument("duration", help="Display duration in seconds, or 'inf'")
-    p.add_argument("text",     help="Message text")
+p = sub.add_parser("show-msg",
+                   help="Display a message (show-msg <seconds|inf> <text>)")
+p.add_argument("duration", help="Display duration in seconds, or 'inf'")
+p.add_argument("text",     help="Message text")
 
-    p = sub.add_parser("show-msg-wait",
-                       help="Display a message and watch for a button press "
-                            "(show-msg-wait <seconds|inf> <buttons> <text>)")
-    p.add_argument("duration", help="Display duration in seconds, or 'inf'")
-    p.add_argument("buttons",  help="Button mask: M5  A  B  M5,A  ANY")
-    p.add_argument("text",     help="Message text")
+p = sub.add_parser("show-msg-wait",
+                   help="Display a message and watch for a button press "
+                        "(show-msg-wait <seconds|inf> <buttons> <text>)")
+p.add_argument("duration", help="Display duration in seconds, or 'inf'")
+p.add_argument("buttons",  help="Button mask: M5  A  B  M5,A  ANY")
+p.add_argument("text",     help="Message text")
 
 
-    p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
-    p.add_argument("state", choices=["on", "off"], help="on or off")
+p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
+p.add_argument("state", choices=["on", "off"], help="on or off")
 
-    sub.add_parser("get-pitchroll", help="Show current pitch/roll axis assignment")
-    p = sub.add_parser(
-        "set-pitchroll",
-        help="Set pitch and roll axis assignment (e.g. +X,-Y)",
-        description=(
-            "Assign a signed UX axis to pitch and roll.\n\n"
-            "Axes: +X  -X  +Y  -Y\n"
-            "  +X  top of screen rises = positive pitch (default pitch)\n"
-            "  +Y  right side rises toward viewer = positive roll (default roll)\n\n"
-            "Use ~ instead of - for negative axes to avoid shell/argparse flag conflict\n"
-            "(e.g. ~X,-Y instead of -X,-Y when pitch is negative)."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument(
-        "axes",
-        metavar="PITCH,ROLL",
-        help=(
-            "Comma-separated axis pair, e.g. +X,-Y or ~X,+Y. "
-            "Each axis is one of: +X -X +Y -Y (use ~ for - to avoid argparse flag conflicts)."
-        ),
-    )
+sub.add_parser("get-pitchroll", help="Show current pitch/roll axis assignment")
+p = sub.add_parser(
+    "set-pitchroll",
+    help="Set pitch and roll axis assignment (e.g. +X,-Y)",
+    description=(
+        "Assign a signed UX axis to pitch and roll.\n\n"
+        "Axes: +X  -X  +Y  -Y\n"
+        "  +X  top of screen rises = positive pitch (default pitch)\n"
+        "  +Y  right side rises toward viewer = positive roll (default roll)\n\n"
+        "Use ~ instead of - for negative axes to avoid shell/argparse flag conflict\n"
+        "(e.g. ~X,-Y instead of -X,-Y when pitch is negative)."
+    ),
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+)
+p.add_argument(
+    "axes",
+    metavar="PITCH,ROLL",
+    help=(
+        "Comma-separated axis pair, e.g. +X,-Y or ~X,+Y. "
+        "Each axis is one of: +X -X +Y -Y (use ~ for - to avoid argparse flag conflicts)."
+    ),
+)
 
-    sub.add_parser("persist",         help="Save current tz, timezone offset, longitude, calibration and pitchroll to NVS")
-    sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
-    sub.add_parser("persist-clear",   help="Invalidate stored values with a single NVS write")
-    sub.add_parser("persist-restore", help="Re-enable and apply last stored NVS values in-session")
-    sub.add_parser("reboot",          help="Software-reset the device")
+sub.add_parser("persist",         help="Save current tz, timezone offset, longitude, calibration and pitchroll to NVS")
+sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
+sub.add_parser("persist-clear",   help="Invalidate stored values with a single NVS write")
+sub.add_parser("persist-restore", help="Re-enable and apply last stored NVS values in-session")
+sub.add_parser("reboot",          help="Software-reset the device")
 
-    p = sub.add_parser("beep",
-                       help="Play a beep or melody (beep [note ...])")
-    p.add_argument("notes", nargs="*",
-                   metavar="NOTE",
-                   help="Musical notation tokens, e.g. C4 E4 G4 C'2 "
-                        "(omit for a standard beep). "
-                        "Octave: ' up, , down from middle C. "
-                        "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
+p = sub.add_parser("beep",
+                   help="Play a beep or melody (beep [note ...])")
+p.add_argument("notes", nargs="*",
+               metavar="NOTE",
+               help="Musical notation tokens, e.g. C4 E4 G4 C'2 "
+                    "(omit for a standard beep). "
+                    "Octave: ' up, , down from middle C. "
+                    "Duration: 1/2/4/8/16. Dot: .. Sharp: #. Flat: b. Rest: -")
 
-    # argparse treats tokens starting with '-' as flags.
-    # For set-timezone: rewrite -HH:MM → ~HH:MM; handler converts back.
-    # For set-pitchroll: rewrite -X,-Y (etc.) → ~X,-Y when the axes arg starts with '-'.
-    _argv = sys.argv[1:]
-    try:
-        _i = _argv.index("set-timezone")
-        if _i + 1 < len(_argv) and re.fullmatch(r'-\d\d:\d\d', _argv[_i + 1]):
-            _argv = list(_argv)
-            _argv[_i + 1] = '~' + _argv[_i + 1][1:]
-    except ValueError:
-        pass
-    try:
-        _i = _argv.index("set-pitchroll")
-        # Rewrite -X or -Y (leading negative axis) to ~X / ~Y so argparse does not
-        # mistake it for an option flag. Only matches actual axis specs, not -h/--help.
-        if _i + 1 < len(_argv) and re.fullmatch(r'-[XYxy](,[+\-~XYxy]+)?', _argv[_i + 1]):
-            _argv = list(_argv)
-            _argv[_i + 1] = '~' + _argv[_i + 1][1:]
-    except ValueError:
-        pass
-    args = parser.parse_args(_argv)
 
-    if args.cmd == "version":
-        print(f"m5ctl {_VERSION}")
-        return
+# ---------------------------------------------------------------------------
+# Script command
+# ---------------------------------------------------------------------------
 
-    if args.cmd == "list":
-        cmd_list()
-        return
+_NON_SCRIPT_CMDS = frozenset({"list", "version", "help", "scan", "listen", "exec", "script", None})
 
-    if args.cmd != "scan":
-        args.device = _resolve_device(args.device)
-        if not args.device:
+
+def cmd_script(script_args, lines: list[str]) -> None:
+    global _script_commands
+    _script_commands = []
+    for line in lines:
+        line_argv = _preprocess_argv(shlex.split(line))
+        try:
+            line_args = parser.parse_args(line_argv)
+        except SystemExit:
+            print(f"error: bad script line: {line!r}", file=sys.stderr)
+            sys.exit(1)
+        if line_args.cmd in _NON_SCRIPT_CMDS:
             print(
-                f"error: no device address configured.\n"
-                f"  Set ${_ENV_VAR}, use --device ADDR_OR_NAME, or add\n"
-                f"  'device.NAME = MAC' entries to {_CONF_FILE.name}.",
+                f"warning: '{line_args.cmd}' cannot be batched, skipping: {line!r}",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            continue
+        line_args.device = script_args.device
+        line_args.timeout = script_args.timeout
+        line_args.print_cmd = script_args.print_cmd
+        dispatch(line_args)
+    commands = list(_script_commands)
+    _script_commands = None
+    run(cmd_exec(script_args.device, commands, script_args.timeout, script_args.print_cmd))
 
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+def dispatch(args) -> None:
     match args.cmd:
         case "help":
             run(cmd_help(args.device, args.timeout, print_cmd=args.print_cmd))
@@ -759,10 +796,42 @@ examples:
                 raw = pathlib.Path(args.file).read_text().splitlines()
             lines = [l.strip() for l in raw if l.strip() and not l.strip().startswith("#")]
             run(cmd_exec(args.device, lines, args.timeout, args.print_cmd))
+        case "script":
+            if args.file == "-":
+                raw = sys.stdin.read().splitlines()
+            else:
+                raw = pathlib.Path(args.file).read_text().splitlines()
+            lines = [l.strip() for l in raw if l.strip() and not l.strip().startswith("#")]
+            cmd_script(args, lines)
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
         case "scan":
             run(cmd_scan(args.timeout))
+
+
+def main() -> None:
+    args = parser.parse_args(_preprocess_argv(sys.argv[1:]))
+
+    if args.cmd == "version":
+        print(f"m5ctl {_VERSION}")
+        return
+
+    if args.cmd == "list":
+        cmd_list()
+        return
+
+    if args.cmd != "scan":
+        args.device = _resolve_device(args.device)
+        if not args.device:
+            print(
+                f"error: no device address configured.\n"
+                f"  Set ${_ENV_VAR}, use --device ADDR_OR_NAME, or add\n"
+                f"  'device.NAME = MAC' entries to {_CONF_FILE.name}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    dispatch(args)
 
 
 if __name__ == "__main__":

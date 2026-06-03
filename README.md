@@ -1031,6 +1031,7 @@ options:
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
 | `reboot` | | Software-reset the device |
 | `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
+| `script` | `FILE` | Run m5ctl commands from a file or stdin (`-`), one per line; each line is parsed as m5ctl arguments (`set-time-now --timezone CEST`, `beep C4`, …); blank lines and `#` comments are ignored |
 
 Examples:
 
@@ -1076,6 +1077,8 @@ uv run tools/m5ctl listen
 uv run tools/m5ctl -p ping                # show the raw BLE command before sending
 uv run tools/m5ctl exec commands.txt     # send commands from a file
 printf 'PING\nGET_TILT\n' | uv run tools/m5ctl exec -   # send from stdin
+uv run tools/m5ctl script setup.m5s     # run m5ctl commands from a script file
+echo 'set-time-now --timezone CEST' | uv run tools/m5ctl script -   # from stdin
 ```
 
 ### Device address configuration
@@ -1252,6 +1255,57 @@ SET_LONGITUDE -3.6875
 SET_PITCHROLL -Y,-X
 PERSIST
 "@ | uv run tools/m5ctl exec -
+```
+
+### `script` — batch m5ctl commands from a file or stdin
+
+`script` reads m5ctl command invocations from a file (or from stdin when the argument is `-`) and runs them all over a **single BLE connection**. Each line is parsed exactly as if it were typed on the command line after `m5ctl` — so `set-time-now --timezone CEST` computes and sends the current time, `beep C4` plays a note, `persist` saves to NVM, and so on. Blank lines and lines starting with `#` are ignored.
+
+```bash
+uv run tools/m5ctl script setup.m5s     # run m5ctl commands from a script file
+uv run tools/m5ctl script -             # read from stdin until EOF
+```
+
+The key difference from `exec` is what the lines contain:
+
+| Command | Line format | Time computation |
+|---|---|---|
+| `exec` | Raw BLE strings (`SET_TIME 2026-06-03T…`, `SET_LONGITUDE -3.6875`) | Must be done by the shell before the pipe |
+| `script` | m5ctl arguments (`set-time-now --timezone CEST`, `set-longitude -3.6875`) | Done automatically inside `set-time-now` |
+
+A setup script equivalent to the `exec` example above, without needing shell date formatting:
+
+```bash
+#!/usr/bin/env bash
+uv run tools/m5ctl script - <<'EOF'
+# Configure the device for a telescope in central Spain (CEST)
+set-time-now --timezone CEST
+set-longitude -3.6875
+set-pitchroll ~Y,-X
+persist
+EOF
+```
+
+`set-time-now` has a built-in `--offset N` (default 3 seconds) that compensates for BLE connection latency, so no `date -d '+3 seconds'` trick is needed.
+
+Add `-p` / `--print-cmd` to echo each resolved BLE command to stderr as it is sent — useful for verifying what `set-time-now` produced:
+
+```bash
+uv run tools/m5ctl -p script setup.m5s
+```
+
+#### PowerShell equivalent
+
+With `script`, the timestamp is computed internally by `set-time-now`, so no PowerShell date formatting is required:
+
+```powershell
+@"
+# Configure the device for a telescope in central Spain (CEST)
+set-time-now --timezone CEST
+set-longitude -3.6875
+set-pitchroll ~Y,-X
+persist
+"@ | uv run tools/m5ctl script -
 ```
 
 ### tests/3d_model.py — real-time 3D orientation viewer
