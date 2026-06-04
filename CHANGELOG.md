@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bypasses the inactivity logic entirely.
 
 ### Fixed
+- **m5ctl** — BLE connection retries now correctly handle `TimeoutError` and
+  `asyncio.CancelledError`, both of which Bleak's WinRT backend raises on
+  Windows when the connection handshake times out (`asyncio.timeout()` cancels
+  the internal session-status wait and the resulting `CancelledError` is
+  re-raised as `TimeoutError`). Neither is a `BleakError` subclass, so
+  previously they escaped the retry loop and crashed the program with an
+  unhandled traceback. The `run()` top-level handler is widened to match so
+  exhausted retries still print a clean `BLE error: …` message.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+- **m5ctl** — after a failed `connect()` attempt, `client.disconnect()` is
+  now called before the next retry. A connection failure leaves the underlying
+  BLE adapter (particularly the WinRT stack on Windows) in a partially-active
+  state; without an explicit release, each retry creates a new `BleakClient`
+  on top of unreclaimed resources, which can cause the next attempt to time out
+  for the same reason as the first. Calling `disconnect()` lets the adapter
+  fully reset between attempts, giving each retry a clean slate.
 - **m5ctl `exec` / `script`** — passing a non-existent file path no longer
   produces a Python traceback. The tool now checks for file existence before
   attempting to read and exits with `error: file not found: '<path>'` on stderr.
