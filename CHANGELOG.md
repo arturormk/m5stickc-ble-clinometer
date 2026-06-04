@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time. Night mode sets its own fixed dim level (`BRIGHTNESS_NIGHT = 40`) and
   bypasses the inactivity logic entirely.
 
+### Fixed
+- **m5ctl `script`** — error messages now include the original file line number
+  (`error: script line 7: bad command: '...'`), making it easier to locate the
+  offending line in the script file. Blank lines and comments are counted when
+  computing the line number so it always matches the editor's line count.
+
 ### Changed
 - CI: add `workflow_dispatch` trigger so releases can be created manually from
   the GitHub Actions UI without pushing a tag.

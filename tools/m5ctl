@@ -644,19 +644,19 @@ p.add_argument("notes", nargs="*",
 _NON_SCRIPT_CMDS = frozenset({"list", "version", "help", "scan", "listen", "exec", "script", None})
 
 
-def cmd_script(script_args, lines: list[str]) -> None:
+def cmd_script(script_args, lines: list[tuple[int, str]]) -> None:
     global _script_commands
     _script_commands = []
-    for line in lines:
+    for lineno, line in lines:
         line_argv = _preprocess_argv(shlex.split(line))
         try:
             line_args = parser.parse_args(line_argv)
         except SystemExit:
-            print(f"error: bad script line: {line!r}", file=sys.stderr)
+            print(f"error: script line {lineno}: bad command: {line!r}", file=sys.stderr)
             sys.exit(1)
         if line_args.cmd in _NON_SCRIPT_CMDS:
             print(
-                f"warning: '{line_args.cmd}' cannot be batched, skipping: {line!r}",
+                f"warning: script line {lineno}: '{line_args.cmd}' cannot be batched, skipping: {line!r}",
                 file=sys.stderr,
             )
             continue
@@ -801,7 +801,8 @@ def dispatch(args) -> None:
                 raw = sys.stdin.read().splitlines()
             else:
                 raw = pathlib.Path(args.file).read_text().splitlines()
-            lines = [l.strip() for l in raw if l.strip() and not l.strip().startswith("#")]
+            lines = [(i + 1, l.strip()) for i, l in enumerate(raw)
+                     if l.strip() and not l.strip().startswith("#")]
             cmd_script(args, lines)
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
