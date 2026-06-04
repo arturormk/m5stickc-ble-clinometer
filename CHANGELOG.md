@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on top of unreclaimed resources, which can cause the next attempt to time out
   for the same reason as the first. Calling `disconnect()` lets the adapter
   fully reset between attempts, giving each retry a clean slate.
+  Unit tests for `_connect()` are updated to match the new `disconnect()`
+  call counts: one cleanup call per failed attempt, plus the normal teardown
+  call when a connection eventually succeeds.
 - **m5ctl `exec` / `script`** — passing a non-existent file path no longer
   produces a Python traceback. The tool now checks for file existence before
   attempting to read and exits with `error: file not found: '<path>'` on stderr.
