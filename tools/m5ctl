@@ -790,6 +790,9 @@ def dispatch(args) -> None:
         case "reboot":
             do_send(args, "REBOOT")
         case "exec":
+            if args.file != "-" and not pathlib.Path(args.file).exists():
+                print(f"error: file not found: {args.file!r}", file=sys.stderr)
+                sys.exit(1)
             if args.file == "-":
                 raw = sys.stdin.read().splitlines()
             else:
@@ -797,6 +800,9 @@ def dispatch(args) -> None:
             lines = [l.strip() for l in raw if l.strip() and not l.strip().startswith("#")]
             run(cmd_exec(args.device, lines, args.timeout, args.print_cmd))
         case "script":
+            if args.file != "-" and not pathlib.Path(args.file).exists():
+                print(f"error: file not found: {args.file!r}", file=sys.stderr)
+                sys.exit(1)
             if args.file == "-":
                 raw = sys.stdin.read().splitlines()
             else:

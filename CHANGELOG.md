@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bypasses the inactivity logic entirely.
 
 ### Fixed
+- **m5ctl `exec` / `script`** — passing a non-existent file path no longer
+  produces a Python traceback. The tool now checks for file existence before
+  attempting to read and exits with `error: file not found: '<path>'` on stderr.
+  (`-` for stdin is unaffected.) Reported by
+  [@senshu-hiro2](https://github.com/senshu-hiro2).
 - **m5ctl `script`** — error messages now include the original file line number
   (`error: script line 7: bad command: '...'`), making it easier to locate the
   offending line in the script file. Blank lines and comments are counted when
