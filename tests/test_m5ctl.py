@@ -554,11 +554,13 @@ async def test_connect_retries_on_transient_failure(m5ctl, monkeypatch):
 
     assert client.connect.await_count == 2
     sleep.assert_awaited_once_with(0.3)
-    client.disconnect.assert_awaited_once()
+    # disconnect is called once to clean up after the failed attempt, then once
+    # more in the finally teardown after the successful connection.
+    assert client.disconnect.await_count == 2
 
 
 async def test_connect_raises_after_all_retries_exhausted(m5ctl, monkeypatch):
-    """All 3 attempts fail — last BleakError re-raised, disconnect never called."""
+    """All 3 attempts fail — last BleakError re-raised, disconnect called once per attempt."""
     from bleak import BleakError
     err = BleakError("device not found")
     client, sleep = _mock_ble(m5ctl, monkeypatch, [err, err, err])
@@ -569,7 +571,9 @@ async def test_connect_raises_after_all_retries_exhausted(m5ctl, monkeypatch):
 
     assert client.connect.await_count == 3
     assert sleep.await_count == 2  # after attempt 0 (0.3 s) and attempt 1 (0.6 s)
-    client.disconnect.assert_not_awaited()
+    # disconnect is called after each failed attempt to release adapter resources;
+    # the finally teardown is never reached since yield is never hit.
+    assert client.disconnect.await_count == 3
 
 
 # ---------------------------------------------------------------------------
