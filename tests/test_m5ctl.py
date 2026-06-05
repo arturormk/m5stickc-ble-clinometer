@@ -158,6 +158,29 @@ def test_handler_iana_name(m5ctl, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# set-time-now command building
+# ---------------------------------------------------------------------------
+
+def test_set_time_now_timezone_default_label(m5ctl, monkeypatch):
+    """--timezone without --label uses the timezone string as the label."""
+    cmd = _cmd(m5ctl, monkeypatch, "set-time-now", "--timezone", "CEST")
+    assert cmd is not None and cmd.startswith("SET_TIME ")
+    assert cmd.endswith(" CEST")
+
+
+def test_set_time_now_timezone_explicit_label(m5ctl, monkeypatch):
+    """--label overrides the auto-derived timezone label."""
+    cmd = _cmd(m5ctl, monkeypatch, "set-time-now", "--timezone", "CEST", "--label", "MyLabel")
+    assert cmd is not None and cmd.endswith(" MyLabel")
+
+
+def test_set_time_now_iana_default_label(m5ctl, monkeypatch):
+    """IANA timezone name is used verbatim as the label."""
+    cmd = _cmd(m5ctl, monkeypatch, "set-time-now", "--timezone", "Asia/Tokyo")
+    assert cmd is not None and cmd.endswith(" Asia/Tokyo")
+
+
+# ---------------------------------------------------------------------------
 # _load_all_devices — config file parsing
 # ---------------------------------------------------------------------------
 

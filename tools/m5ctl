@@ -726,10 +726,14 @@ def dispatch(args) -> None:
             # An optional label override follows the timestamp.
             ts = now.strftime("%Y-%m-%dT%H:%M:%S") + _fmt_offset(now.utcoffset())
             cmd = f"SET_TIME {ts}"
-            if not args.utc and not args.timezone and not args.label:
+            if args.label:
+                label = args.label
+            elif args.timezone:
+                label = args.timezone
+            elif not args.utc:
                 label = now.strftime("%Z")
             else:
-                label = args.label
+                label = ""
             if label:
                 cmd += f" {label}"
             do_send(args, cmd)

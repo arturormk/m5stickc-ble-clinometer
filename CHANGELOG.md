@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **m5ctl** — `set-time-now --timezone TZ` now uses the timezone string (`TZ`)
+  as the device display label when `--label` is not given, instead of sending no
+  label and letting the device fall back to the UTC offset from the ISO8601
+  timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
+
 ### Added
 - **m5ctl** — `script FILE` subcommand: reads m5ctl command invocations from a
   file (or stdin when `FILE` is `-`), one per line, and runs them all over a
