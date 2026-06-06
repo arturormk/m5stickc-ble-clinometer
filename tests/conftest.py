@@ -8,7 +8,7 @@ import sys
 from typing import ClassVar
 
 import pytest
-from bleak import BleakClient, BleakError
+from bleak import BleakClient, BleakScanner, BleakError
 from bleak.exc import BleakDeviceNotFoundError
 
 CONNECT_TIMEOUT = 10.0
@@ -190,12 +190,17 @@ class BleSession:
         self._borrowed = False
 
     async def _do_connect(self) -> None:
-        """Connect, using the BlueZ D-Bus cache on Linux to skip re-scanning.
+        """Connect, handling platform-specific re-advertising delays.
 
-        On Linux/BlueZ, once a device disconnects it may stop advertising, so a
-        fresh BleakScanner.find_device_by_address() call never finds it again.
-        dangerous_use_bleak_cache=True uses BlueZ's cached object path instead.
-        On a cold start (no cache entry yet) it falls back to a normal scan.
+        Linux/BlueZ: once a device disconnects it stops advertising, so a fresh
+        scan never finds it.  dangerous_use_bleak_cache=True uses BlueZ's cached
+        object path instead; falls back to a full scan on cold start.
+
+        Windows/WinRT: FromBluetoothAddressAsync fails immediately (no retry) on a
+        cache miss when the device has not restarted advertising yet.  Pre-scanning
+        with find_device_by_address waits up to _timeout seconds for the device to
+        appear before calling connect(), avoiding spurious BleakDeviceNotFoundError
+        on rapid reconnects (e.g. between test modules in --ble-keep-alive mode).
         """
         if sys.platform == "linux":
             try:
@@ -204,6 +209,14 @@ class BleSession:
             except BleakDeviceNotFoundError:
                 # No cache entry yet — recreate client and do a full scan.
                 self._client = BleakClient(self._address, timeout=self._timeout)
+        if sys.platform == "win32":
+            device = await BleakScanner.find_device_by_address(
+                self._address, timeout=self._timeout
+            )
+            if device is None:
+                raise BleakDeviceNotFoundError(
+                    f"Device with address {self._address} was not found."
+                )
         await self._client.connect()
 
     async def __aenter__(self) -> "BleSession":

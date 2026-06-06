@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from contextlib import asynccontextmanager
 from bleak import BleakClient, BleakScanner, BleakError
+from bleak.exc import BleakDeviceNotFoundError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
@@ -171,6 +172,17 @@ async def _connect(address: str, timeout: float, retries: int = 3):
     for attempt in range(retries):
         client = BleakClient(address, timeout=timeout)
         try:
+            if sys.platform == "win32":
+                # WinRT's FromBluetoothAddressAsync fails immediately on a cache miss
+                # (device not yet advertising after a previous disconnect).  Pre-scanning
+                # waits up to `timeout` seconds for the device to appear, so the retry
+                # loop's backoff applies to genuine scan failures rather than racing
+                # against the device's re-advertising delay.
+                device = await BleakScanner.find_device_by_address(address, timeout=timeout)
+                if device is None:
+                    raise BleakDeviceNotFoundError(
+                        f"Device with address {address} was not found."
+                    )
             await client.connect()
             break
         except (BleakError, TimeoutError, asyncio.CancelledError) as exc:

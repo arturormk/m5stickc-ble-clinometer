@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bypasses the inactivity logic entirely.
 
 ### Fixed
+- **m5ctl / tests** — on Windows, `BleakDeviceNotFoundError` during a connection
+  attempt is no longer a near-instant failure. WinRT's
+  `FromBluetoothAddressAsync` returns "not found" immediately when the target
+  device is absent from the OS Bluetooth advertisement cache (e.g. it has not
+  yet restarted advertising after a previous disconnect). This caused the retry
+  loop's backoff sleeps to be the only waiting mechanism, and with fast-failing
+  retries the three attempts could be exhausted in under a second — before the
+  device had finished re-advertising. The fix adds an explicit
+  `BleakScanner.find_device_by_address()` pre-scan on Windows before each
+  `connect()` call (in both `_connect()` in `m5ctl` and `BleSession._do_connect()`
+  in the test fixtures). The scanner waits up to `CONNECT_TIMEOUT` seconds for
+  the device to appear in advertisements, converting an instant cache-miss into a
+  patient scan. This mirrors the `dangerous_use_bleak_cache` workaround already
+  in place for the analogous Linux/BlueZ re-advertising problem.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 - **m5ctl** — BLE connection retries now correctly handle `TimeoutError` and
   `asyncio.CancelledError`, both of which Bleak's WinRT backend raises on
   Windows when the connection handshake times out (`asyncio.timeout()` cancels
