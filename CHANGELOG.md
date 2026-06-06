@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streaming is active the display is kept at full brightness regardless of elapsed
   time. Night mode sets its own fixed dim level (`BRIGHTNESS_NIGHT = 40`) and
   bypasses the inactivity logic entirely.
+- Firmware version string (`FW_VERSION`) defined in `src/version.h`. The version
+  is now surfaced in two places: the `GET_STATUS` BLE response gains a `FW=`
+  field (e.g. `… NIGHT=0 FW=1.1`), and the BATTERY screen shows
+  "Firmware ver 1.1" in cyan near the bottom of the display.
 
 ### Fixed
 - **m5ctl / tests** — on Windows, `BleakDeviceNotFoundError` during a connection

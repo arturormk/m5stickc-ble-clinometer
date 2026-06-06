@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "../version.h"
 #include <lgfx/Fonts/GFXFF/FreeSans9pt7b.h>
 #include <math.h>
 #include <time.h>
@@ -545,9 +546,9 @@ void Display::_drawBattery(const DeviceState& state) {
     }
 
     // Voltage and percentage below the bar, positioned relative to it
-    int readY = _H * 106 / 135;
+    int readY = _H * 104 / 135;
     int voltX = BAR_X + BAR_W * 3 / 8;
-    int pctX  = BAR_X + BAR_W * 7 / 8;
+    int pctX  = BAR_X + BAR_W * 6 / 8;
 
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_WHITE, n));
@@ -567,6 +568,14 @@ void Display::_drawBattery(const DeviceState& state) {
     } else {
         _sprite->drawString("--%", pctX, readY);
     }
+
+    int verY = _H * 125 / 135;
+    int verX = _W / 2;
+    _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setTextDatum(textdatum_t::middle_center);
+    _sprite->drawString("Firmware ver " FW_VERSION, verX, verY);
+
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 

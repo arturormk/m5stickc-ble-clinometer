@@ -94,6 +94,7 @@ async def test_get_status_fields(device_addr):
     assert "STREAM=" in resp
     assert "BAT=" in resp
     assert "NIGHT=" in resp
+    assert "FW=" in resp
 
 
 _KNOWN_BOARDS = {

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "../version.h"
 
 // ---------------------------------------------------------------------------
 // Module-level state accessible from callbacks
@@ -159,12 +160,13 @@ static void formatIso8601(time_t t, char* buf, size_t len) {
 
 // Assemble the STATUS response line
 static void buildStatusLine(const DeviceState& state, char* buf, size_t len) {
-    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d",
+    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d FW=%s",
              screenName(state.screenIndex),
              state.bleConnected ? 1 : 0,
              state.streamEnabled ? 1 : 0,
              state.batteryVoltage,
-             state.nightMode ? 1 : 0);
+             state.nightMode ? 1 : 0,
+             FW_VERSION);
 }
 
 // ---------------------------------------------------------------------------
