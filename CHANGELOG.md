@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Firmware** — BLE command processing no longer runs inside the Bluedroid
+  `onWrite()` callback. Previously, all command dispatch — float formatting,
+  `snprintf`, sidereal arithmetic, NVS calls — executed synchronously on the
+  BLE FreeRTOS task. On the M5StickS3 this triggers the Bluedroid task
+  watchdog and resets the device, making every non-trivial command
+  (`GET_TILT`, `GET_STATUS`, `SET_TIME`, `CALIBRATE`, …) fail with a
+  timeout. The fix moves processing to the main Arduino task: `onWrite()` now
+  only copies the raw command bytes to a `volatile pendingBleCommand[256]`
+  buffer and sets a flag; `BleManager::update()` (called from `loop()`)
+  drains the flag, runs `processCommand()`, and then sends the response as
+  before. This is consistent with the existing deferred-send pattern for
+  `pendingBleResponse`. The Plus2 is unaffected by the watchdog but benefits
+  from the same robustness margin if command complexity grows.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+- **Firmware / tests** — `GET_BOARD` now recognises the M5StickS3.
+  `boardTypeName()` in `BleManager.cpp` gains a `board_M5StickS3` case
+  returning `"M5StickS3"`, and `_KNOWN_BOARDS` in `test_commands.py` is
+  extended to match.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
 - **m5ctl** — `set-time-now --timezone TZ` now uses the timezone string (`TZ`)
   as the device display label when `--label` is not given, instead of sending no
   label and letting the device fall back to the UTC offset from the ISO8601

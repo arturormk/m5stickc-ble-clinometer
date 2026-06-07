@@ -145,6 +145,7 @@ static const char* boardTypeName(m5::board_t board) {
         case m5::board_t::board_M5StackCore2:  return "M5StackCore2";
         case m5::board_t::board_M5StackCoreS3: return "M5StackCoreS3";
         case m5::board_t::board_M5Stack:       return "M5Stack";
+        case m5::board_t::board_M5StickS3:     return "M5StickS3";
         default:                               return "unknown";
     }
 }
@@ -284,487 +285,502 @@ static const char* const kHelpLines[] = {
 };
 static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
 
-class BleCmdCallbacks : public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic* pChar) override {
-        if (!s_state) return;
-        s_state->lastBleCommandMs = millis();
+// ---------------------------------------------------------------------------
+// Command processor — runs on main task (avoids BLE task watchdog on S3)
+// ---------------------------------------------------------------------------
 
-        // Copy value to local buffer (pChar->getValue() is a std::string)
-        std::string val = pChar->getValue();
-        if (val.empty()) return;
+static void processCommand(const char* raw) {
+    char cmd[256];
+    strncpy(cmd, raw, sizeof(cmd) - 1);
+    cmd[sizeof(cmd) - 1] = '\0';
 
-        char cmd[256];
-        size_t copyLen = val.size() < sizeof(cmd) - 1 ? val.size() : sizeof(cmd) - 1;
-        memcpy(cmd, val.data(), copyLen);
-        cmd[copyLen] = '\0';
+    // Strip trailing whitespace/newline
+    int end = (int)strlen(cmd) - 1;
+    while (end >= 0 && (cmd[end] == '\r' || cmd[end] == '\n' || cmd[end] == ' '))
+        cmd[end--] = '\0';
 
-        // Detect newline-terminated protocol (sticky per connection)
-        if (!s_state->bleClientWantsNewline && val.back() == '\n')
-            s_state->bleClientWantsNewline = true;
+    // Normalise unicode spaces; reject embedded control characters
+    {
+        uint32_t badCp = 0;
+        if (!sanitizeBleInput(cmd, &badCp)) {
+            snprintf((char*)s_state->pendingBleResponse,
+                     sizeof(s_state->pendingBleResponse),
+                     "ERR INVALID_CHAR U+%04" PRIX32, badCp);
+            s_state->pendingBleResponseReady = true;
+            return;
+        }
+    }
 
-        // Strip trailing whitespace/newline
-        int end = (int)strlen(cmd) - 1;
-        while (end >= 0 && (cmd[end] == '\r' || cmd[end] == '\n' || cmd[end] == ' '))
-            cmd[end--] = '\0';
+    char resp[160];
+    resp[0] = '\0';
 
-        // Normalise unicode spaces; reject embedded control characters
-        {
-            uint32_t badCp = 0;
-            if (!sanitizeBleInput(cmd, &badCp)) {
-                snprintf((char*)s_state->pendingBleResponse,
-                         sizeof(s_state->pendingBleResponse),
-                         "ERR INVALID_CHAR U+%04" PRIX32, badCp);
-                s_state->pendingBleResponseReady = true;
-                return;
-            }
+    // Tokenize
+    char* saveptr = nullptr;
+    char* tok = strtok_r(cmd, " ", &saveptr);
+    if (!tok) {
+        strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+        goto respond;
+    }
+
+    // ---- Query commands ----
+
+    if (strcasecmp(tok, "PING") == 0) {
+        strncpy(resp, "OK PONG", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "GET_TILT") == 0) {
+        snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f %.2f",
+                 s_state->pitchDeg, s_state->rollDeg, s_state->accMag);
+
+    } else if (strcasecmp(tok, "GET_BOARD") == 0) {
+        snprintf(resp, sizeof(resp), "BOARD %s", boardTypeName(M5.getBoard()));
+
+    } else if (strcasecmp(tok, "GET_PITCHROLL") == 0) {
+        snprintf(resp, sizeof(resp), "PITCHROLL %s,%s",
+                 axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
+
+    } else if (strcasecmp(tok, "GET_STATUS") == 0) {
+        buildStatusLine(*s_state, resp, sizeof(resp));
+
+    } else if (strcasecmp(tok, "GET_TIME") == 0) {
+        if (s_state->utcAnchorSec == 0) {
+            strncpy(resp, "TIME NONE", sizeof(resp) - 1);
+        } else if (s_state->siderealMode) {
+            uint32_t lst = currentLstSeconds(*s_state);
+            int h  = (int)(lst / 3600);
+            int m  = (int)((lst % 3600) / 60);
+            int sc = (int)(lst % 60);
+            const char* label = isnan(s_state->longitudeDeg) ? "GST" : s_state->timezoneLabel;
+            snprintf(resp, sizeof(resp), "TIME %02d:%02d:%02d %s", h, m, sc, label);
+        } else {
+            char iso[24];
+            formatIso8601(deviceCurrentTime(*s_state), iso, sizeof(iso));
+            snprintf(resp, sizeof(resp), "TIME %s", iso);  // always UTC with Z
         }
 
-        char resp[160];
-        resp[0] = '\0';
+    } else if (strcasecmp(tok, "GET_RADEC") == 0) {
+        snprintf(resp, sizeof(resp), "RADEC %s %s",
+                 s_state->raText, s_state->decText);
 
-        // Tokenize
-        char* saveptr = nullptr;
-        char* tok = strtok_r(cmd, " ", &saveptr);
-        if (!tok) {
-            strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-            goto respond;
+    } else if (strcasecmp(tok, "GET_ALTAZ") == 0) {
+        snprintf(resp, sizeof(resp), "ALTAZ %s %s",
+                 s_state->altText, s_state->azText);
+
+    } else if (strcasecmp(tok, "GET_MSG") == 0) {
+        if (!s_state->messageActive) {
+            strncpy(resp, "MSG NONE", sizeof(resp) - 1);
+        } else {
+            char durStr[12];
+            if (s_state->messagePersistent) {
+                strncpy(durStr, "INF", sizeof(durStr) - 1);
+            } else {
+                uint32_t now = millis();
+                int remaining = 0;
+                if (s_state->messageExpiresAtMs > now)
+                    remaining = (int)((s_state->messageExpiresAtMs - now) / 1000) + 1;
+                snprintf(durStr, sizeof(durStr), "%d", remaining);
+            }
+            // Build button string
+            char btnStr[16] = "NONE";
+            if (s_state->messageAwaitButtons) {
+                btnStr[0] = '\0';
+                bool first = true;
+                if (s_state->messageAwaitButtons & BTN_MASK_M5) {
+                    strcat(btnStr, "M5"); first = false;
+                }
+                if (s_state->messageAwaitButtons & BTN_MASK_A) {
+                    if (!first) strcat(btnStr, ",");
+                    strcat(btnStr, "A"); first = false;
+                }
+                if (s_state->messageAwaitButtons & BTN_MASK_B) {
+                    if (!first) strcat(btnStr, ",");
+                    strcat(btnStr, "B");
+                }
+            }
+            snprintf(resp, sizeof(resp), "MSG ACTIVE %s FONT=%u BUTTONS=%s TEXT=%s",
+                     durStr, s_state->messageFontCode, btnStr, s_state->messageText);
         }
 
-        // ---- Query commands ----
+    // ---- Update commands ----
 
-        if (strcasecmp(tok, "PING") == 0) {
-            strncpy(resp, "OK PONG", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "GET_TILT") == 0) {
-            snprintf(resp, sizeof(resp), "TILT %+.2f %+.2f %.2f",
-                     s_state->pitchDeg, s_state->rollDeg, s_state->accMag);
-
-        } else if (strcasecmp(tok, "GET_BOARD") == 0) {
-            snprintf(resp, sizeof(resp), "BOARD %s", boardTypeName(M5.getBoard()));
-
-        } else if (strcasecmp(tok, "GET_PITCHROLL") == 0) {
-            snprintf(resp, sizeof(resp), "PITCHROLL %s,%s",
-                     axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
-
-        } else if (strcasecmp(tok, "GET_STATUS") == 0) {
-            buildStatusLine(*s_state, resp, sizeof(resp));
-
-        } else if (strcasecmp(tok, "GET_TIME") == 0) {
-            if (s_state->utcAnchorSec == 0) {
-                strncpy(resp, "TIME NONE", sizeof(resp) - 1);
-            } else if (s_state->siderealMode) {
-                uint32_t lst = currentLstSeconds(*s_state);
-                int h  = (int)(lst / 3600);
-                int m  = (int)((lst % 3600) / 60);
-                int sc = (int)(lst % 60);
-                const char* label = isnan(s_state->longitudeDeg) ? "GST" : s_state->timezoneLabel;
-                snprintf(resp, sizeof(resp), "TIME %02d:%02d:%02d %s", h, m, sc, label);
-            } else {
-                char iso[24];
-                formatIso8601(deviceCurrentTime(*s_state), iso, sizeof(iso));
-                snprintf(resp, sizeof(resp), "TIME %s", iso);  // always UTC with Z
-            }
-
-        } else if (strcasecmp(tok, "GET_RADEC") == 0) {
-            snprintf(resp, sizeof(resp), "RADEC %s %s",
-                     s_state->raText, s_state->decText);
-
-        } else if (strcasecmp(tok, "GET_ALTAZ") == 0) {
-            snprintf(resp, sizeof(resp), "ALTAZ %s %s",
-                     s_state->altText, s_state->azText);
-
-        } else if (strcasecmp(tok, "GET_MSG") == 0) {
-            if (!s_state->messageActive) {
-                strncpy(resp, "MSG NONE", sizeof(resp) - 1);
-            } else {
-                char durStr[12];
-                if (s_state->messagePersistent) {
-                    strncpy(durStr, "INF", sizeof(durStr) - 1);
-                } else {
-                    uint32_t now = millis();
-                    int remaining = 0;
-                    if (s_state->messageExpiresAtMs > now)
-                        remaining = (int)((s_state->messageExpiresAtMs - now) / 1000) + 1;
-                    snprintf(durStr, sizeof(durStr), "%d", remaining);
-                }
-                // Build button string
-                char btnStr[16] = "NONE";
-                if (s_state->messageAwaitButtons) {
-                    btnStr[0] = '\0';
-                    bool first = true;
-                    if (s_state->messageAwaitButtons & BTN_MASK_M5) {
-                        strcat(btnStr, "M5"); first = false;
-                    }
-                    if (s_state->messageAwaitButtons & BTN_MASK_A) {
-                        if (!first) strcat(btnStr, ",");
-                        strcat(btnStr, "A"); first = false;
-                    }
-                    if (s_state->messageAwaitButtons & BTN_MASK_B) {
-                        if (!first) strcat(btnStr, ",");
-                        strcat(btnStr, "B");
-                    }
-                }
-                snprintf(resp, sizeof(resp), "MSG ACTIVE %s FONT=%u BUTTONS=%s TEXT=%s",
-                         durStr, s_state->messageFontCode, btnStr, s_state->messageText);
-            }
-
-        // ---- Update commands ----
-
-        } else if (strcasecmp(tok, "SET_TIME") == 0) {
-            char* iso = strtok_r(nullptr, " ", &saveptr);
-            if (!iso) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            time_t utcEpoch;
-            int32_t offsetSec = 0;
-            char tzBuf[32] = {};
-            if (!parseIso8601(iso, &utcEpoch, &offsetSec, tzBuf, sizeof(tzBuf))) {
-                strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
-            } else {
-                // Use saveptr directly so multi-word labels like "New York" or
-                // "東京 (標準時)" are captured verbatim (strtok_r would split on spaces).
-                // Guard against NULL: newlib sets saveptr=NULL when the token ends at \0.
-                const char* labelStart = saveptr ? saveptr : "";
-                while (*labelStart == ' ') labelStart++;
-                if (*labelStart)
-                    snprintf(tzBuf, sizeof(tzBuf), "%s", labelStart);
-                // Write true UTC to RTC
-                if (M5.Rtc.isEnabled()) {
-                    struct tm utcTm;
-                    gmtime_r(&utcEpoch, &utcTm);
-                    M5.Rtc.setDateTime(&utcTm);
-                }
-                s_state->siderealMode    = false;
-                // Update timezone only when the ISO8601 carried an explicit offset
-                if (offsetSec != 0 || tzBuf[0] != '\0') {
-                    s_state->timezoneOffsetSec = offsetSec;
-                    strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
-                    s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
-                }
-                s_state->utcAnchorSec = utcEpoch;
-                s_state->anchorUs     = esp_timer_get_time();
-                Nvm::rebuildAnchor(*s_state);
-                strncpy(resp, "OK TIME", sizeof(resp) - 1);
-            }
-
-        } else if (strcasecmp(tok, "SET_TIME_ZONE") == 0) {
-            char* spec = strtok_r(nullptr, " ", &saveptr);
-            if (!spec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+    } else if (strcasecmp(tok, "SET_TIME") == 0) {
+        char* iso = strtok_r(nullptr, " ", &saveptr);
+        if (!iso) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        time_t utcEpoch;
+        int32_t offsetSec = 0;
+        char tzBuf[32] = {};
+        if (!parseIso8601(iso, &utcEpoch, &offsetSec, tzBuf, sizeof(tzBuf))) {
+            strncpy(resp, "ERR BAD_TIME", sizeof(resp) - 1);
+        } else {
             // Use saveptr directly so multi-word labels like "New York" or
             // "東京 (標準時)" are captured verbatim (strtok_r would split on spaces).
             // Guard against NULL: newlib sets saveptr=NULL when the token ends at \0.
             const char* labelStart = saveptr ? saveptr : "";
             while (*labelStart == ' ') labelStart++;
-            if (strcasecmp(spec, "UTC") == 0) {
-                s_state->siderealMode      = false;
-                s_state->timezoneOffsetSec = 0;
-                strncpy(s_state->timezoneLabel, "UTC", sizeof(s_state->timezoneLabel) - 1);
-            } else if (strcasecmp(spec, "LST") == 0 || strcasecmp(spec, "GST") == 0) {
-                s_state->siderealMode = true;
-                const char* defaultLabel = isnan(s_state->longitudeDeg) ? "GST" : "LST";
-                strncpy(s_state->timezoneLabel, defaultLabel, sizeof(s_state->timezoneLabel) - 1);
-            } else if (spec[0] == '+' || spec[0] == '-') {
-                int sign = (spec[0] == '+') ? 1 : -1, hh = 0, mm = 0;
-                if (sscanf(spec + 1, "%d:%d", &hh, &mm) != 2) {
-                    strncpy(resp, "ERR BAD_TZ", sizeof(resp) - 1);
-                    goto respond;
-                }
-                s_state->siderealMode      = false;
-                s_state->timezoneOffsetSec = sign * (hh * 3600 + mm * 60);
-                strncpy(s_state->timezoneLabel, spec, sizeof(s_state->timezoneLabel) - 1);
-                s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
-            } else {
-                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-                goto respond;
+            if (*labelStart)
+                snprintf(tzBuf, sizeof(tzBuf), "%s", labelStart);
+            // Write true UTC to RTC
+            if (M5.Rtc.isEnabled()) {
+                struct tm utcTm;
+                gmtime_r(&utcEpoch, &utcTm);
+                M5.Rtc.setDateTime(&utcTm);
             }
-            if (*labelStart) {
-                strncpy(s_state->timezoneLabel, labelStart, sizeof(s_state->timezoneLabel) - 1);
+            s_state->siderealMode    = false;
+            // Update timezone only when the ISO8601 carried an explicit offset
+            if (offsetSec != 0 || tzBuf[0] != '\0') {
+                s_state->timezoneOffsetSec = offsetSec;
+                strncpy(s_state->timezoneLabel, tzBuf, sizeof(s_state->timezoneLabel) - 1);
                 s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
             }
+            s_state->utcAnchorSec = utcEpoch;
+            s_state->anchorUs     = esp_timer_get_time();
             Nvm::rebuildAnchor(*s_state);
-            strncpy(resp, "OK TIMEZONE", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SET_LONGITUDE") == 0) {
-            char* degStr = strtok_r(nullptr, " ", &saveptr);
-            if (!degStr) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            float deg;
-            if (strcasecmp(degStr, "NONE") == 0) {
-                deg = NAN;
-            } else {
-                char* end = degStr;
-                deg = strtof(degStr, &end);
-                if (end == degStr || deg < -180.0f || deg > 180.0f) {
-                    strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-                    goto respond;
-                }
-            }
-            s_state->longitudeDeg = deg;
-            if (s_state->siderealMode)
-                strncpy(s_state->timezoneLabel, isnan(deg) ? "GST" : "LST",
-                        sizeof(s_state->timezoneLabel) - 1);
-            Nvm::rebuildAnchor(*s_state);
-            strncpy(resp, "OK LONGITUDE", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SET_RADEC") == 0) {
-            char* ra  = strtok_r(nullptr, " ", &saveptr);
-            char* dec = strtok_r(nullptr, " ", &saveptr);
-            if (!ra || !dec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            strncpy(s_state->raText,  ra,  sizeof(s_state->raText)  - 1);
-            strncpy(s_state->decText, dec, sizeof(s_state->decText) - 1);
-            strncpy(resp, "OK RADEC", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SET_ALTAZ") == 0) {
-            char* alt = strtok_r(nullptr, " ", &saveptr);
-            char* az  = strtok_r(nullptr, " ", &saveptr);
-            if (!alt || !az) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            strncpy(s_state->altText, alt, sizeof(s_state->altText) - 1);
-            strncpy(s_state->azText,  az,  sizeof(s_state->azText)  - 1);
-            strncpy(resp, "OK ALTAZ", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SHOW_MSG") == 0) {
-            char* dur  = strtok_r(nullptr, " ", &saveptr);
-            // Everything remaining after duration is the message text
-            char* text = strtok_r(nullptr, "", &saveptr);
-            if (!dur || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            while (*text == ' ') text++;
-            {
-                uint8_t fontCode = 0;
-                bool beep = false;
-                while (*text) {
-                    if (strncasecmp(text, "FONT:", 5) == 0) {
-                        fontCode = (uint8_t)atoi(text + 5);
-                        while (*text && *text != ' ') text++;
-                        while (*text == ' ') text++;
-                    } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
-                        beep = true;
-                        text += 4;
-                        while (*text == ' ') text++;
-                    } else {
-                        break;
-                    }
-                }
-                s_state->messageFontCode = fontCode;
-                if (fontCode == 0 && hasNonAscii(text))
-                    s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
-                if (beep) {
-                    s_state->melodyNotes[0].freqHz = 880;
-                    s_state->melodyNotes[0].durMs  = 200;
-                    s_state->melodyPendingLength   = 1;
-                    s_state->melodyPending         = true;
-                }
-            }
-            strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
-            s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
-            s_state->messageAwaitButtons = 0;
-            if (strcasecmp(dur, "INF") == 0) {
-                s_state->messagePersistent   = true;
-                s_state->messageExpiresAtMs  = 0;
-            } else {
-                int secs = atoi(dur);
-                s_state->messagePersistent   = false;
-                s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
-            }
-            if (s_state->screenIndex != SCREEN_MESSAGE)
-                s_state->prevScreenIndex = s_state->screenIndex;
-            s_state->messageActive   = true;
-            s_state->screenIndex     = SCREEN_MESSAGE;
-            strncpy(resp, "OK MSG", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SHOW_MSG_WAIT") == 0) {
-            char* dur  = strtok_r(nullptr, " ", &saveptr);
-            char* btns = strtok_r(nullptr, " ", &saveptr);
-            char* text = strtok_r(nullptr, "", &saveptr);
-            if (!dur || !btns || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            while (*text == ' ') text++;
-            {
-                uint8_t fontCode = 0;
-                bool beep = false;
-                while (*text) {
-                    if (strncasecmp(text, "FONT:", 5) == 0) {
-                        fontCode = (uint8_t)atoi(text + 5);
-                        while (*text && *text != ' ') text++;
-                        while (*text == ' ') text++;
-                    } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
-                        beep = true;
-                        text += 4;
-                        while (*text == ' ') text++;
-                    } else {
-                        break;
-                    }
-                }
-                s_state->messageFontCode = fontCode;
-                if (fontCode == 0 && hasNonAscii(text))
-                    s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
-                if (beep) {
-                    s_state->melodyNotes[0].freqHz = 880;
-                    s_state->melodyNotes[0].durMs  = 200;
-                    s_state->melodyPendingLength   = 1;
-                    s_state->melodyPending         = true;
-                }
-            }
-            strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
-            s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
-            s_state->messageAwaitButtons = parseMsgButtons(btns);
-            if (strcasecmp(dur, "INF") == 0) {
-                s_state->messagePersistent   = true;
-                s_state->messageExpiresAtMs  = 0;
-            } else {
-                int secs = atoi(dur);
-                s_state->messagePersistent   = false;
-                s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
-            }
-            if (s_state->screenIndex != SCREEN_MESSAGE)
-                s_state->prevScreenIndex = s_state->screenIndex;
-            s_state->messageActive   = true;
-            s_state->screenIndex     = SCREEN_MESSAGE;
-            strncpy(resp, "OK MSG_WAIT", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "CANCEL_MSG") == 0) {
-            s_state->messageActive = false;
-            s_state->screenIndex   = s_state->prevScreenIndex;
-            strncpy(resp, "OK MSG_CANCEL", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "START_STREAM") == 0) {
-            char* ms = strtok_r(nullptr, " ", &saveptr);
-            if (!ms) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            uint32_t period = (uint32_t)atoi(ms);
-            if (period < 100) period = 100; // minimum 100ms
-            s_state->streamEnabled  = true;
-            s_state->streamPeriodMs = period;
-            s_state->lastStreamMs   = millis();
-            snprintf(resp, sizeof(resp), "OK STREAM %u", period);
-
-        } else if (strcasecmp(tok, "STOP_STREAM") == 0) {
-            s_state->streamEnabled = false;
-            strncpy(resp, "OK STREAM 0", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "SET_NIGHT_MODE") == 0) {
-            char* val = strtok_r(nullptr, " ", &saveptr);
-            if (!val) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            if (strcasecmp(val, "ON") == 0) {
-                s_state->nightMode = true;
-                strncpy(resp, "OK NIGHT_MODE ON", sizeof(resp) - 1);
-            } else if (strcasecmp(val, "OFF") == 0) {
-                s_state->nightMode = false;
-                strncpy(resp, "OK NIGHT_MODE OFF", sizeof(resp) - 1);
-            } else {
-                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-            }
-
-        } else if (strcasecmp(tok, "SET_PITCHROLL") == 0) {
-            // Argument format: "<pitchAxis>,<rollAxis>"  e.g. "+X,-Y"
-            char* arg = strtok_r(nullptr, " ", &saveptr);
-            if (!arg) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            // Split on comma
-            char* comma = strchr(arg, ',');
-            if (!comma) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
-            *comma = '\0';
-            const char* pitchTok = arg;
-            const char* rollTok  = comma + 1;
-            int8_t pa, ra;
-            if (!parseAxisToken(pitchTok, pa) || !parseAxisToken(rollTok, ra)) {
-                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-                goto respond;
-            }
-            s_state->pitchAxis = pa;
-            s_state->rollAxis  = ra;
-            snprintf(resp, sizeof(resp), "OK PITCHROLL %s,%s",
-                     axisCodeStr(pa), axisCodeStr(ra));
-
-        } else if (strcasecmp(tok, "BEEP") == 0) {
-            char* arg = strtok_r(nullptr, "", &saveptr);
-            while (arg && *arg == ' ') arg++;
-            if (!arg || *arg == '\0') {
-                s_state->melodyNotes[0] = {880, 200};
-                s_state->melodyPendingLength = 1;
-            } else {
-                const char* errPtr = nullptr;
-                int n = parseMelody(arg, (MelodyNote*)s_state->melodyNotes, MELODY_MAX_NOTES, &errPtr);
-                if (n <= 0) {
-                    if (errPtr)
-                        snprintf(resp, sizeof(resp), "ERR BAD_MELODY %.*s^%s",
-                                 (int)(errPtr - arg), arg, errPtr);
-                    else
-                        strncpy(resp, "ERR BAD_MELODY", sizeof(resp) - 1);
-                    goto respond;
-                }
-                s_state->melodyPendingLength = n;
-            }
-            s_state->melodyPending = true;
-            strncpy(resp, "OK BEEP", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "CALIBRATE") == 0) {
-            float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
-            char* sx = strtok_r(nullptr, " ", &saveptr);
-            if (sx) {
-                char* sy = strtok_r(nullptr, " ", &saveptr);
-                char* sz = sy ? strtok_r(nullptr, " ", &saveptr) : nullptr;
-                if (!sy || !sz) {
-                    strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
-                    goto respond;
-                }
-                if (s_imu) s_imu->calibrateFrom(strtof(sx, nullptr),
-                                                 strtof(sy, nullptr),
-                                                 strtof(sz, nullptr));
-                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
-            } else {
-                if (s_imu) s_imu->calibrate(rgx, rgy, rgz);
-            }
-            snprintf(resp, sizeof(resp), "CALIBRATED %+.4f %+.4f %+.4f", rgx, rgy, rgz);
-
-        } else if (strcasecmp(tok, "CALIBRATE_RESET") == 0) {
-            if (s_imu) s_imu->resetCalibration();
-            strncpy(resp, "OK CALIBRATION_RESET", sizeof(resp) - 1);
-
-        } else if (strcasecmp(tok, "PERSIST") == 0) {
-            char* sub = strtok_r(nullptr, " ", &saveptr);
-            if (sub && strcasecmp(sub, "READ") == 0) {
-                Nvm::formatStatus(resp, sizeof(resp));
-            } else if (sub && strcasecmp(sub, "CLEAR") == 0) {
-                Nvm::clear();
-                strncpy(resp, "OK CLEARED", sizeof(resp) - 1);
-            } else if (sub && strcasecmp(sub, "RESTORE") == 0) {
-                if (s_imu) Nvm::restore(*s_state, *s_imu);
-                float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
-                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
-                char lonBuf[16];
-                if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
-                else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
-                snprintf(resp, sizeof(resp),
-                         "OK RESTORED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
-                         s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
-                         axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
-            } else {
-                float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
-                if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
-                if (s_imu) Nvm::saveAll(*s_state, *s_imu);
-                char lonBuf[16];
-                if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
-                else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
-                snprintf(resp, sizeof(resp),
-                         "OK PERSISTED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
-                         s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
-                         s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
-                         axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
-            }
-
-        } else if (strcasecmp(tok, "REBOOT") == 0) {
-            strncpy(resp, "OK REBOOTING", sizeof(resp) - 1);
-            s_state->pendingReboot = true;
-
-        } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
-            s_state->pendingBleHelpLine = 0;
-            return;
-
-        } else {
-            strncpy(resp, "ERR UNKNOWN_COMMAND", sizeof(resp) - 1);
+            strncpy(resp, "OK TIME", sizeof(resp) - 1);
         }
 
-    respond:
-        // Hand off response to main loop via volatile buffer
-        strncpy((char*)s_state->pendingBleResponse, resp,
-                sizeof(s_state->pendingBleResponse) - 1);
-        ((char*)s_state->pendingBleResponse)[sizeof(s_state->pendingBleResponse) - 1] = '\0';
-        s_state->pendingBleResponseReady = true;
+    } else if (strcasecmp(tok, "SET_TIME_ZONE") == 0) {
+        char* spec = strtok_r(nullptr, " ", &saveptr);
+        if (!spec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        // Use saveptr directly so multi-word labels like "New York" or
+        // "東京 (標準時)" are captured verbatim (strtok_r would split on spaces).
+        // Guard against NULL: newlib sets saveptr=NULL when the token ends at \0.
+        const char* labelStart = saveptr ? saveptr : "";
+        while (*labelStart == ' ') labelStart++;
+        if (strcasecmp(spec, "UTC") == 0) {
+            s_state->siderealMode      = false;
+            s_state->timezoneOffsetSec = 0;
+            strncpy(s_state->timezoneLabel, "UTC", sizeof(s_state->timezoneLabel) - 1);
+        } else if (strcasecmp(spec, "LST") == 0 || strcasecmp(spec, "GST") == 0) {
+            s_state->siderealMode = true;
+            const char* defaultLabel = isnan(s_state->longitudeDeg) ? "GST" : "LST";
+            strncpy(s_state->timezoneLabel, defaultLabel, sizeof(s_state->timezoneLabel) - 1);
+        } else if (spec[0] == '+' || spec[0] == '-') {
+            int sign = (spec[0] == '+') ? 1 : -1, hh = 0, mm = 0;
+            if (sscanf(spec + 1, "%d:%d", &hh, &mm) != 2) {
+                strncpy(resp, "ERR BAD_TZ", sizeof(resp) - 1);
+                goto respond;
+            }
+            s_state->siderealMode      = false;
+            s_state->timezoneOffsetSec = sign * (hh * 3600 + mm * 60);
+            strncpy(s_state->timezoneLabel, spec, sizeof(s_state->timezoneLabel) - 1);
+            s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+        } else {
+            strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+            goto respond;
+        }
+        if (*labelStart) {
+            strncpy(s_state->timezoneLabel, labelStart, sizeof(s_state->timezoneLabel) - 1);
+            s_state->timezoneLabel[sizeof(s_state->timezoneLabel) - 1] = '\0';
+        }
+        Nvm::rebuildAnchor(*s_state);
+        strncpy(resp, "OK TIMEZONE", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SET_LONGITUDE") == 0) {
+        char* degStr = strtok_r(nullptr, " ", &saveptr);
+        if (!degStr) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        float deg;
+        if (strcasecmp(degStr, "NONE") == 0) {
+            deg = NAN;
+        } else {
+            char* endp = degStr;
+            deg = strtof(degStr, &endp);
+            if (endp == degStr || deg < -180.0f || deg > 180.0f) {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                goto respond;
+            }
+        }
+        s_state->longitudeDeg = deg;
+        if (s_state->siderealMode)
+            strncpy(s_state->timezoneLabel, isnan(deg) ? "GST" : "LST",
+                    sizeof(s_state->timezoneLabel) - 1);
+        Nvm::rebuildAnchor(*s_state);
+        strncpy(resp, "OK LONGITUDE", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SET_RADEC") == 0) {
+        char* ra  = strtok_r(nullptr, " ", &saveptr);
+        char* dec = strtok_r(nullptr, " ", &saveptr);
+        if (!ra || !dec) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        strncpy(s_state->raText,  ra,  sizeof(s_state->raText)  - 1);
+        strncpy(s_state->decText, dec, sizeof(s_state->decText) - 1);
+        strncpy(resp, "OK RADEC", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SET_ALTAZ") == 0) {
+        char* alt = strtok_r(nullptr, " ", &saveptr);
+        char* az  = strtok_r(nullptr, " ", &saveptr);
+        if (!alt || !az) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        strncpy(s_state->altText, alt, sizeof(s_state->altText) - 1);
+        strncpy(s_state->azText,  az,  sizeof(s_state->azText)  - 1);
+        strncpy(resp, "OK ALTAZ", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SHOW_MSG") == 0) {
+        char* dur  = strtok_r(nullptr, " ", &saveptr);
+        // Everything remaining after duration is the message text
+        char* text = strtok_r(nullptr, "", &saveptr);
+        if (!dur || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        while (*text == ' ') text++;
+        {
+            uint8_t fontCode = 0;
+            bool beep = false;
+            while (*text) {
+                if (strncasecmp(text, "FONT:", 5) == 0) {
+                    fontCode = (uint8_t)atoi(text + 5);
+                    while (*text && *text != ' ') text++;
+                    while (*text == ' ') text++;
+                } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
+                    beep = true;
+                    text += 4;
+                    while (*text == ' ') text++;
+                } else {
+                    break;
+                }
+            }
+            s_state->messageFontCode = fontCode;
+            if (fontCode == 0 && hasNonAscii(text))
+                s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
+            if (beep) {
+                s_state->melodyNotes[0].freqHz = 880;
+                s_state->melodyNotes[0].durMs  = 200;
+                s_state->melodyPendingLength   = 1;
+                s_state->melodyPending         = true;
+            }
+        }
+        strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
+        s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
+        s_state->messageAwaitButtons = 0;
+        if (strcasecmp(dur, "INF") == 0) {
+            s_state->messagePersistent   = true;
+            s_state->messageExpiresAtMs  = 0;
+        } else {
+            int secs = atoi(dur);
+            s_state->messagePersistent   = false;
+            s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
+        }
+        if (s_state->screenIndex != SCREEN_MESSAGE)
+            s_state->prevScreenIndex = s_state->screenIndex;
+        s_state->messageActive   = true;
+        s_state->screenIndex     = SCREEN_MESSAGE;
+        strncpy(resp, "OK MSG", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SHOW_MSG_WAIT") == 0) {
+        char* dur  = strtok_r(nullptr, " ", &saveptr);
+        char* btns = strtok_r(nullptr, " ", &saveptr);
+        char* text = strtok_r(nullptr, "", &saveptr);
+        if (!dur || !btns || !text) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        while (*text == ' ') text++;
+        {
+            uint8_t fontCode = 0;
+            bool beep = false;
+            while (*text) {
+                if (strncasecmp(text, "FONT:", 5) == 0) {
+                    fontCode = (uint8_t)atoi(text + 5);
+                    while (*text && *text != ' ') text++;
+                    while (*text == ' ') text++;
+                } else if (strncasecmp(text, "BEEP", 4) == 0 && (text[4]==' ' || text[4]=='\0')) {
+                    beep = true;
+                    text += 4;
+                    while (*text == ' ') text++;
+                } else {
+                    break;
+                }
+            }
+            s_state->messageFontCode = fontCode;
+            if (fontCode == 0 && hasNonAscii(text))
+                s_state->messageFontCode = 6;  // lgfxJapanGothic_24 matches Font4 (26px)
+            if (beep) {
+                s_state->melodyNotes[0].freqHz = 880;
+                s_state->melodyNotes[0].durMs  = 200;
+                s_state->melodyPendingLength   = 1;
+                s_state->melodyPending         = true;
+            }
+        }
+        strncpy(s_state->messageText, text, sizeof(s_state->messageText) - 1);
+        s_state->messageText[sizeof(s_state->messageText) - 1] = '\0';
+        s_state->messageAwaitButtons = parseMsgButtons(btns);
+        if (strcasecmp(dur, "INF") == 0) {
+            s_state->messagePersistent   = true;
+            s_state->messageExpiresAtMs  = 0;
+        } else {
+            int secs = atoi(dur);
+            s_state->messagePersistent   = false;
+            s_state->messageExpiresAtMs  = millis() + (uint32_t)(secs * 1000);
+        }
+        if (s_state->screenIndex != SCREEN_MESSAGE)
+            s_state->prevScreenIndex = s_state->screenIndex;
+        s_state->messageActive   = true;
+        s_state->screenIndex     = SCREEN_MESSAGE;
+        strncpy(resp, "OK MSG_WAIT", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "CANCEL_MSG") == 0) {
+        s_state->messageActive = false;
+        s_state->screenIndex   = s_state->prevScreenIndex;
+        strncpy(resp, "OK MSG_CANCEL", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "START_STREAM") == 0) {
+        char* ms = strtok_r(nullptr, " ", &saveptr);
+        if (!ms) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        uint32_t period = (uint32_t)atoi(ms);
+        if (period < 100) period = 100; // minimum 100ms
+        s_state->streamEnabled  = true;
+        s_state->streamPeriodMs = period;
+        s_state->lastStreamMs   = millis();
+        snprintf(resp, sizeof(resp), "OK STREAM %u", period);
+
+    } else if (strcasecmp(tok, "STOP_STREAM") == 0) {
+        s_state->streamEnabled = false;
+        strncpy(resp, "OK STREAM 0", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "SET_NIGHT_MODE") == 0) {
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (!arg) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        if (strcasecmp(arg, "ON") == 0) {
+            s_state->nightMode = true;
+            strncpy(resp, "OK NIGHT_MODE ON", sizeof(resp) - 1);
+        } else if (strcasecmp(arg, "OFF") == 0) {
+            s_state->nightMode = false;
+            strncpy(resp, "OK NIGHT_MODE OFF", sizeof(resp) - 1);
+        } else {
+            strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+        }
+
+    } else if (strcasecmp(tok, "SET_PITCHROLL") == 0) {
+        // Argument format: "<pitchAxis>,<rollAxis>"  e.g. "+X,-Y"
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (!arg) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        // Split on comma
+        char* comma = strchr(arg, ',');
+        if (!comma) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        *comma = '\0';
+        const char* pitchTok = arg;
+        const char* rollTok  = comma + 1;
+        int8_t pa, ra;
+        if (!parseAxisToken(pitchTok, pa) || !parseAxisToken(rollTok, ra)) {
+            strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+            goto respond;
+        }
+        s_state->pitchAxis = pa;
+        s_state->rollAxis  = ra;
+        snprintf(resp, sizeof(resp), "OK PITCHROLL %s,%s",
+                 axisCodeStr(pa), axisCodeStr(ra));
+
+    } else if (strcasecmp(tok, "BEEP") == 0) {
+        char* arg = strtok_r(nullptr, "", &saveptr);
+        while (arg && *arg == ' ') arg++;
+        if (!arg || *arg == '\0') {
+            s_state->melodyNotes[0] = {880, 200};
+            s_state->melodyPendingLength = 1;
+        } else {
+            const char* errPtr = nullptr;
+            int n = parseMelody(arg, (MelodyNote*)s_state->melodyNotes, MELODY_MAX_NOTES, &errPtr);
+            if (n <= 0) {
+                if (errPtr)
+                    snprintf(resp, sizeof(resp), "ERR BAD_MELODY %.*s^%s",
+                             (int)(errPtr - arg), arg, errPtr);
+                else
+                    strncpy(resp, "ERR BAD_MELODY", sizeof(resp) - 1);
+                goto respond;
+            }
+            s_state->melodyPendingLength = n;
+        }
+        s_state->melodyPending = true;
+        strncpy(resp, "OK BEEP", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "CALIBRATE") == 0) {
+        float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+        char* sx = strtok_r(nullptr, " ", &saveptr);
+        if (sx) {
+            char* sy = strtok_r(nullptr, " ", &saveptr);
+            char* sz = sy ? strtok_r(nullptr, " ", &saveptr) : nullptr;
+            if (!sy || !sz) {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+                goto respond;
+            }
+            if (s_imu) s_imu->calibrateFrom(strtof(sx, nullptr),
+                                             strtof(sy, nullptr),
+                                             strtof(sz, nullptr));
+            if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+        } else {
+            if (s_imu) s_imu->calibrate(rgx, rgy, rgz);
+        }
+        snprintf(resp, sizeof(resp), "CALIBRATED %+.4f %+.4f %+.4f", rgx, rgy, rgz);
+
+    } else if (strcasecmp(tok, "CALIBRATE_RESET") == 0) {
+        if (s_imu) s_imu->resetCalibration();
+        strncpy(resp, "OK CALIBRATION_RESET", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "PERSIST") == 0) {
+        char* sub = strtok_r(nullptr, " ", &saveptr);
+        if (sub && strcasecmp(sub, "READ") == 0) {
+            Nvm::formatStatus(resp, sizeof(resp));
+        } else if (sub && strcasecmp(sub, "CLEAR") == 0) {
+            Nvm::clear();
+            strncpy(resp, "OK CLEARED", sizeof(resp) - 1);
+        } else if (sub && strcasecmp(sub, "RESTORE") == 0) {
+            if (s_imu) Nvm::restore(*s_state, *s_imu);
+            float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+            if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+            char lonBuf[16];
+            if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
+            else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
+            snprintf(resp, sizeof(resp),
+                     "OK RESTORED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
+                     s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
+                     s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
+                     axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
+        } else {
+            float rgx = 0.0f, rgy = 0.0f, rgz = 1.0f;
+            if (s_imu) s_imu->getCalibrationRef(rgx, rgy, rgz);
+            if (s_imu) Nvm::saveAll(*s_state, *s_imu);
+            char lonBuf[16];
+            if (isnan(s_state->longitudeDeg)) snprintf(lonBuf, sizeof(lonBuf), "(none)");
+            else snprintf(lonBuf, sizeof(lonBuf), "%.4f", s_state->longitudeDeg);
+            snprintf(resp, sizeof(resp),
+                     "OK PERSISTED tz=%s tz_offset=%d lon=%s cal=%.4f,%.4f,%.4f pitchroll=%s,%s",
+                     s_state->timezoneLabel[0] ? s_state->timezoneLabel : "(none)",
+                     s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
+                     axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
+        }
+
+    } else if (strcasecmp(tok, "REBOOT") == 0) {
+        strncpy(resp, "OK REBOOTING", sizeof(resp) - 1);
+        s_state->pendingReboot = true;
+
+    } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
+        s_state->pendingBleHelpLine = 0;
+        return;
+
+    } else {
+        strncpy(resp, "ERR UNKNOWN_COMMAND", sizeof(resp) - 1);
+    }
+
+respond:
+    strncpy((char*)s_state->pendingBleResponse, resp,
+            sizeof(s_state->pendingBleResponse) - 1);
+    ((char*)s_state->pendingBleResponse)[sizeof(s_state->pendingBleResponse) - 1] = '\0';
+    s_state->pendingBleResponseReady = true;
+}
+
+// ---------------------------------------------------------------------------
+// Command characteristic callbacks — runs on BLE FreeRTOS task
+// ---------------------------------------------------------------------------
+
+class BleCmdCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic* pChar) override {
+        if (!s_state) return;
+        s_state->lastBleCommandMs = millis();
+
+        std::string val = pChar->getValue();
+        if (val.empty()) return;
+
+        // Detect newline-terminated protocol (sticky per connection)
+        if (!s_state->bleClientWantsNewline && val.back() == '\n')
+            s_state->bleClientWantsNewline = true;
+
+        // Copy raw bytes to pending buffer; processing is deferred to the main
+        // loop via update() to avoid triggering the BLE task watchdog on S3.
+        size_t copyLen = val.size() < sizeof(s_state->pendingBleCommand) - 1
+                       ? val.size() : sizeof(s_state->pendingBleCommand) - 1;
+        memcpy((char*)s_state->pendingBleCommand, val.data(), copyLen);
+        ((char*)s_state->pendingBleCommand)[copyLen] = '\0';
+        s_state->pendingBleCommandReady = true;
     }
 };
 
@@ -819,6 +835,15 @@ void BleManager::update(DeviceState& state) {
         _pServer->startAdvertising();
     }
     _wasConnected = state.bleConnected;
+
+    // Process pending BLE command on the main task (avoids watchdog on S3)
+    if (state.pendingBleCommandReady) {
+        char localCmd[256];
+        strncpy(localCmd, (const char*)state.pendingBleCommand, sizeof(localCmd) - 1);
+        localCmd[sizeof(localCmd) - 1] = '\0';
+        state.pendingBleCommandReady = false;
+        processCommand(localCmd);
+    }
 
     // Drain pending command response
     if (state.pendingBleResponseReady) {

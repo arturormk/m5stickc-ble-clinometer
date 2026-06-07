@@ -93,6 +93,8 @@ struct DeviceState {
 
     bool     pendingReboot;
 
+    volatile char pendingBleCommand[256];
+    volatile bool pendingBleCommandReady;
     volatile char pendingBleResponse[160];
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];

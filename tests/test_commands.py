@@ -99,6 +99,7 @@ async def test_get_status_fields(device_addr):
 
 _KNOWN_BOARDS = {
     "M5StickCPlus2", "M5StickCPlus", "M5StickC",
+    "M5StickS3",
     "M5StackCore2", "M5StackCoreS3", "M5Stack",
     "unknown",
 }
