@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **tests** — `test_stop_stream` and `test_stream_packets` had a race condition
+  where `send("START_STREAM …")` could return an in-flight `TILT` packet
+  (instead of `OK STREAM …`) and leave the start-ack unread in the notification
+  queue. In `test_stop_stream` the stale `OK STREAM 200` was then silently
+  skipped by `recv_matching("OK STREAM")` — correct by accident because
+  `"OK STREAM 200".startswith("OK STREAM")` is true and could match before
+  `"OK STREAM 0"`. Both tests are rewritten to use `send_no_wait` +
+  `recv_matching("OK STREAM 200")` for the start round-trip so every command
+  ack is explicitly consumed by the call that requested it, and no legitimate
+  response can become accidental noise. The stop round-trip uses the precise
+  prefix `"OK STREAM 0"` in both tests.
+
 - **Firmware** — BLE command processing no longer runs inside the Bluedroid
   `onWrite()` callback. Previously, all command dispatch — float formatting,
   `snprintf`, sidereal arithmetic, NVS calls — executed synchronously on the

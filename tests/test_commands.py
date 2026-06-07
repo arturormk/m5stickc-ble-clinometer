@@ -943,9 +943,10 @@ async def test_stream_minimum_period(device_addr):
 @pytest.mark.asyncio
 async def test_stop_stream(device_addr):
     async with BleSession(device_addr) as s:
-        await s.send("START_STREAM 200")
+        await s.send_no_wait("START_STREAM 200")
+        await s.recv_matching("OK STREAM 200", timeout=5.0)
         await s.send_no_wait("STOP_STREAM")
-        resp = await s.recv_matching("OK STREAM", timeout=2.0)
+        resp = await s.recv_matching("OK STREAM 0", timeout=2.0)
         assert resp == "OK STREAM 0"
 
 
@@ -953,7 +954,8 @@ async def test_stop_stream(device_addr):
 async def test_stream_packets(device_addr):
     """Stream should deliver TILT packets at the requested interval."""
     async with BleSession(device_addr) as s:
-        await s.send("START_STREAM 200")
+        await s.send_no_wait("START_STREAM 200")
+        await s.recv_matching("OK STREAM 200", timeout=5.0)
         for _ in range(3):
             pkt = await s.recv(timeout=1.0)
             assert pkt.startswith("TILT ")
@@ -964,8 +966,7 @@ async def test_stream_packets(device_addr):
             g = float(parts[3])
             assert 0.5 <= g <= 1.5, f"gravity magnitude {g}g out of expected range for a stationary device"
         await s.send_no_wait("STOP_STREAM")
-        # Drain the queue until we see the OK (skipping any in-flight TILT packets)
-        await s.recv_matching("OK STREAM", timeout=2.0)
+        await s.recv_matching("OK STREAM 0", timeout=2.0)
 
 
 @pytest.mark.asyncio
