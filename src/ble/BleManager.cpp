@@ -290,7 +290,7 @@ static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0
 // ---------------------------------------------------------------------------
 
 static void processCommand(const char* raw) {
-    char cmd[256];
+    static char cmd[256];
     strncpy(cmd, raw, sizeof(cmd) - 1);
     cmd[sizeof(cmd) - 1] = '\0';
 
@@ -311,7 +311,7 @@ static void processCommand(const char* raw) {
         }
     }
 
-    char resp[160];
+    static char resp[160];
     resp[0] = '\0';
 
     // Tokenize

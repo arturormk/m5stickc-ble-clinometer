@@ -13,10 +13,11 @@ void PowerManager::begin() {
 
     if (M5.Speaker.isEnabled()) {
         struct { m5::board_t board; uint8_t volume; } kVol[] = {
+            { m5::board_t::board_M5StickS3,     128 },
             { m5::board_t::board_M5StickCPlus2, 100 },
             { m5::board_t::board_M5StickCPlus,  100 },
-            { m5::board_t::board_M5Stack,         40 },
-            { m5::board_t::board_M5StackCore2,    40 },
+            { m5::board_t::board_M5Stack,        40 },
+            { m5::board_t::board_M5StackCore2,   40 },
         };
         uint8_t vol = 50;
         m5::board_t b = M5.getBoard();

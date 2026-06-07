@@ -40,12 +40,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extended to match.
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
+- **Firmware / M5StickS3** — BLE commands intermittently hung on the
+  M5StickS3. The root cause was the Bluedroid BTC FreeRTOS task running with
+  an insufficient default stack (~4 KB). The new `[env:mstickS3]` build sets
+  `-DCONFIG_BT_BTC_TASK_STACK_SIZE=10240` (10 KB), resolving the stall.
+  A secondary fix makes the two local buffers inside `processCommand()`
+  (`cmd[256]` and `resp[160]`) `static`, removing 416 bytes of stack pressure
+  from the Arduino loop task on every command dispatch. Both buffers are fully
+  overwritten at the start of each call so the change is semantically neutral.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
 - **m5ctl** — `set-time-now --timezone TZ` now uses the timezone string (`TZ`)
   as the device display label when `--label` is not given, instead of sending no
   label and letting the device fall back to the UTC offset from the ISO8601
   timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
 
 ### Added
+- **M5StickS3 support** — new `[env:mstickS3]` PlatformIO environment for the
+  M5StickS3 (ESP32-S3, 8 MB flash, PSRAM). Includes the flags required for
+  correct operation: `BOARD_HAS_PSRAM`, `-mfix-esp32-psram-cache-issue`,
+  `ARDUINO_USB_CDC_ON_BOOT=1`, `ARDUINO_USB_MODE=1`. Speaker volume is
+  initialised to 128 for this board. The base platform is upgraded from
+  `espressif32@6.1.0` to `espressif32@^7.0.1`, aligning all environments on
+  the same major version (CoreS3 already required 7.x).
+  Machine-specific upload/monitor port settings belong in a `platformio.ini.local`
+  file (now `.gitignore`d) rather than in the shared `platformio.ini`.
+  Contributed by [@senshu-hiro2](https://github.com/senshu-hiro2).
 - **m5ctl** — `script FILE` subcommand: reads m5ctl command invocations from a
   file (or stdin when `FILE` is `-`), one per line, and runs them all over a
   single BLE connection. Each line is parsed as m5ctl arguments

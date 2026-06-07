@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 .m5ctl.conf
 m5ctl.conf
+platformio.ini.local
