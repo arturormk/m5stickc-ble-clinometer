@@ -544,12 +544,18 @@ def test_handler_set_pitchroll_missing_comma_exits(m5ctl, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _mock_ble(m5ctl, monkeypatch, connect_side_effect):
-    """Patch BleakClient and asyncio.sleep; return (mock_client, mock_sleep)."""
+    """Patch BleakClient, BleakScanner, and asyncio.sleep; return (mock_client, mock_sleep)."""
     from bleak import BleakError  # noqa: F401 — ensure importable
     mock_client = MagicMock()
     mock_client.connect = AsyncMock(side_effect=connect_side_effect)
     mock_client.disconnect = AsyncMock()
     monkeypatch.setattr(m5ctl, "BleakClient", lambda *a, **kw: mock_client)
+    # On Windows _connect calls BleakScanner.find_device_by_address before client.connect().
+    # Without this patch the pre-scan hits the real BLE stack and raises BleakDeviceNotFoundError,
+    # which bypasses client.connect() entirely and breaks all three retry tests.
+    mock_scanner = MagicMock()
+    mock_scanner.find_device_by_address = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr(m5ctl, "BleakScanner", mock_scanner)
     mock_sleep = AsyncMock()
     monkeypatch.setattr(m5ctl.asyncio, "sleep", mock_sleep)
     return mock_client, mock_sleep

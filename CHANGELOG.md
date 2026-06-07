@@ -93,6 +93,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`error: script line 7: bad command: '...'`), making it easier to locate the
   offending line in the script file. Blank lines and comments are counted when
   computing the line number so it always matches the editor's line count.
+- **tests** — the three `_connect` retry unit tests (`test_connect_first_attempt_succeeds`,
+  `test_connect_retries_on_transient_failure`, `test_connect_raises_after_all_retries_exhausted`)
+  now fail on Windows with `BleakDeviceNotFoundError` or a wrong `connect()` call count.
+  The `_mock_ble` helper patched `BleakClient` and `asyncio.sleep` but left `BleakScanner`
+  unpatched. On Windows `_connect()` calls `BleakScanner.find_device_by_address()` before
+  `client.connect()`, so the real BLE stack was hit, found no device, and the synthesised
+  `BleakDeviceNotFoundError` either escaped (tests 1 & 2) or was caught but with
+  `connect()` never called (test 3's call-count assertion). Fixed by also patching
+  `BleakScanner` in `_mock_ble` with `find_device_by_address` returning a fake device,
+  so every retry test reaches `client.connect()` as intended.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
 ### Changed
 - CI: add `workflow_dispatch` trigger so releases can be created manually from
