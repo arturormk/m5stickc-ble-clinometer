@@ -8,7 +8,7 @@ Usage:
     python tests/3d_model.py --sim             # animated demo, no BLE
     python tests/3d_model.py -d main --model 2
 
-Keys: 1/2/3 switch device model, Q/Esc quit.
+Keys: 1/2/3/4 switch device model, Q/Esc quit.
 """
 
 import argparse
@@ -21,7 +21,7 @@ import threading
 from dataclasses import dataclass, field
 
 import pygame
-from pygame.locals import DOUBLEBUF, OPENGL, KEYDOWN, QUIT, K_ESCAPE, K_q, K_1, K_2, K_3, K_c
+from pygame.locals import DOUBLEBUF, OPENGL, KEYDOWN, QUIT, K_ESCAPE, K_q, K_1, K_2, K_3, K_4, K_c
 from OpenGL.GL import (
     GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_DEPTH_TEST,
     GL_MODELVIEW, GL_PROJECTION, GL_QUADS,
@@ -128,8 +128,9 @@ class DeviceModel:
     d: float          # Z half-dimension (depth / 2)
     # pitch_axis: device-hardware UX-to-IMU mapping (ADR 0002), used only for
     # reconstructing the raw IMU vector shown in the HUD.
-    #   'X' (StickC landscape) → IMU ax = -guy,  ay = gux,  az = guz
-    #   'Y' (Core2/CoreS3)     → IMU ax =  gux,  ay = guy,  az = guz
+    #   'X'   (StickC Plus 2 landscape) → IMU ax = -guy,  ay =  gux,  az = guz
+    #   'Y'   (Core2/CoreS3)            → IMU ax =  gux,  ay =  guy,  az = guz
+    #   'NXY' (StickS3)                 → IMU ax = -gux,  ay = -guy,  az = guz
     pitch_axis: str   = 'Y'
     # GL rotation axes derived from the UX-to-model axis mapping for this device.
     # ux_x_gl: model-space axis vector corresponding to UX +X (screen right).
@@ -139,6 +140,8 @@ class DeviceModel:
     #   a positive rotation about UX −Y.
     # M5StickC Plus 2 landscape: UX +X = model +Y, UX +Y = model −X
     #   → ux_x_gl=(0,1,0), ux_neg_y_gl=(1,0,0)
+    # M5StickS3: same physical form factor and screen orientation as Plus 2
+    #   → same ux_x_gl / ux_neg_y_gl; IMU axes differ (see pitch_axis='NXY')
     # Core2 / CoreS3: UX frame = model frame
     #   → ux_x_gl=(1,0,0), ux_neg_y_gl=(0,−1,0)
     ux_x_gl:     tuple = (1.0,  0.0, 0.0)
@@ -153,8 +156,8 @@ class DeviceModel:
     scr_w_frac:   float = 0.88  # screen half-width  as fraction of w
     scr_h_frac:   float = 0.88  # screen half-height as fraction of h
 
-# Physical mm → OpenGL units via /20.  Plus 2 is portrait (Y is long axis).
-# Plus 2 screen (~14 × 25 mm) sits toward the +Y end (top in portrait, away
+# Physical mm → OpenGL units via /20.  Stick devices are portrait (Y is long axis).
+# Plus 2 / S3 screen (~14 × 25 mm) sits toward the +Y end (top in portrait, away
 # from the USB-C port) and is narrower than the body.
 MODELS = [
     DeviceModel("M5StickC Plus 2", w=27.3/20, h=53.3/20, d=13.5/20,
@@ -164,6 +167,12 @@ MODELS = [
                 camera_eye=(1.8, -6.8, 5.0)),
     DeviceModel("M5Stack CoreS3",  w=54.0/20, h=54.0/20, d=13.0/20,
                 camera_eye=(1.8, -6.8, 5.0)),
+    # S3: same body/screen layout as Plus 2; IMU X and Y axes are both negated
+    # relative to UX (UX +X = IMU −X, UX +Y = IMU −Y).
+    DeviceModel("M5StickS3",       w=27.3/20, h=53.3/20, d=13.5/20,
+                pitch_axis='NXY', ux_x_gl=(0.0, 1.0, 0.0), ux_neg_y_gl=(1.0, 0.0, 0.0),
+                camera_eye=(6.5, -3.0, 5.0),
+                scr_y_offset=0.25, scr_w_frac=0.52, scr_h_frac=0.48),
 ]
 
 # Maps GET_BOARD response strings to MODELS indices.
@@ -174,6 +183,7 @@ BOARD_TO_MODEL: dict[str, int] = {
     "M5StackCore2":  1,
     "M5StackCoreS3": 2,
     "M5Stack":       1,  # original Core falls back to Core2 geometry
+    "M5StickS3":     3,
 }
 
 # ── Shared state between BLE thread and render thread ─────────────────────────
@@ -407,10 +417,23 @@ def draw_axes(model: DeviceModel, show_ux: bool = False) -> None:
             ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # UX +Z  blue
         ]
     else:
+        # Derive IMU axis directions in GL model space from the UX↔IMU mapping.
+        # 'X'   (Plus 2): IMU +X = UX −Y = ux_neg_y_gl,  IMU +Y = UX +X = ux_x_gl
+        # 'NXY' (S3):     IMU +X = UX −X = −ux_x_gl,     IMU +Y = UX −Y = ux_neg_y_gl
+        # 'Y'   (Core2):  IMU +X = UX +X = ux_x_gl,      IMU +Y = UX +Y = −ux_neg_y_gl
+        if model.pitch_axis == 'X':
+            imu_x: tuple = model.ux_neg_y_gl
+            imu_y: tuple = model.ux_x_gl
+        elif model.pitch_axis == 'NXY':
+            imu_x = (-model.ux_x_gl[0], -model.ux_x_gl[1], -model.ux_x_gl[2])
+            imu_y = model.ux_neg_y_gl
+        else:
+            imu_x = model.ux_x_gl
+            imu_y = (-model.ux_neg_y_gl[0], -model.ux_neg_y_gl[1], -model.ux_neg_y_gl[2])
         axes = [
-            ((0.9, 0.15, 0.15), (1.0, 0.0, 0.0)),  # IMU +X  red
-            ((0.15, 0.9, 0.15), (0.0, 1.0, 0.0)),  # IMU +Y  green
-            ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),  # IMU +Z  blue
+            ((0.9, 0.15, 0.15), imu_x),             # IMU +X  red
+            ((0.15, 0.9, 0.15), imu_y),              # IMU +Y  green
+            ((0.15, 0.35, 0.9), (0.0, 0.0, 1.0)),   # IMU +Z  blue
         ]
 
     for color, direction in axes:
@@ -517,6 +540,8 @@ class Renderer:
                     new_model = 1
                 elif event.key == K_3:
                     new_model = 2
+                elif event.key == K_4:
+                    new_model = 3
                 elif event.key == K_c:
                     toggle_axes = True
         return False, new_model, toggle_axes
@@ -577,8 +602,11 @@ class Renderer:
 
         # HUD IMU vector: project UX gravity onto device IMU axes.
         if model.pitch_axis == 'X':
-            # M5StickC landscape: IMU ax = -guy, ay = gux, az = guz
+            # M5StickC Plus 2 landscape: UX +X = IMU +Y, UX +Y = IMU -X
             ax, ay, az = -guy_ux, gux_ux, guz_ux
+        elif model.pitch_axis == 'NXY':
+            # M5StickS3: UX +X = IMU -X, UX +Y = IMU -Y
+            ax, ay, az = -gux_ux, -guy_ux, guz_ux
         else:
             # Core2 / CoreS3: UX frame = IMU frame
             ax, ay, az = gux_ux, guy_ux, guz_ux
@@ -602,7 +630,7 @@ class Renderer:
             f"accX: {ax:+.3f}   accY: {ay:+.3f}   accZ: {az:+.3f}",
             f"BLE: {ble_status}",
             f"BOARD (from firmware): {board_name or '(none)'}",
-            f"Model (viewer): {model.name}   [1/2/3] switch  [C] {'UX' if show_ux else 'IMU'} axes  [Q] quit",
+            f"Model (viewer): {model.name}   [1-4] switch  [C] {'UX' if show_ux else 'IMU'} axes  [Q] quit",
         ]
         self._draw_hud(hud_lines)
 
@@ -690,8 +718,8 @@ def main() -> None:
         help="Run in simulator mode (no BLE, animated demo)",
     )
     parser.add_argument(
-        "--model", type=int, choices=[1, 2, 3], default=None, metavar="N",
-        help="Device model: 1=Plus2, 2=Core2, 3=CoreS3. Auto-detected via GET_BOARD if omitted.",
+        "--model", type=int, choices=[1, 2, 3, 4], default=None, metavar="N",
+        help="Device model: 1=Plus2, 2=Core2, 3=CoreS3, 4=StickS3. Auto-detected via GET_BOARD if omitted.",
     )
     args = parser.parse_args()
 

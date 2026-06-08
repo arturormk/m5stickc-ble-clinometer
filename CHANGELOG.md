@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **3D viewer** — IMU axis arrows (toggled with `C`) are now drawn in the
+  physically correct model-space directions for each device. Previously
+  `draw_axes()` always used the fixed GL frame `(1,0,0)`, `(0,1,0)`,
+  `(0,0,1)`, which happened to coincide with the IMU axes for the Plus 2 and
+  Core2/CoreS3 but are wrong for the M5StickS3. Directions are now derived
+  from each model's `pitch_axis` field:
+  - `'X'` (Plus 2): IMU +X = GL +X (= UX −Y), IMU +Y = GL +Y (= UX +X) — unchanged
+  - `'NXY'` (S3): IMU +X = GL −Y (= UX −X), IMU +Y = GL +X (= UX −Y) — fixed
+  - `'Y'` (Core2/CoreS3): UX = IMU frame — unchanged
+
 - **tests** — `test_stop_stream` and `test_stream_packets` had a race condition
   where `send("START_STREAM …")` could return an in-flight `TILT` packet
   (instead of `OK STREAM …`) and leave the start-ack unread in the notification
@@ -69,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
 
 ### Added
+- **3D viewer** — M5StickS3 model added to `tests/3d_model.py`. Body
+  dimensions and UX/GL axis layout are identical to the M5StickC Plus 2 (same
+  landscape camera eye, same screen inset, same `ux_x_gl` / `ux_neg_y_gl`);
+  only the IMU ↔ UX mapping differs (`pitch_axis='NXY'`: UX +X = IMU −X,
+  UX +Y = IMU −Y). `BOARD_TO_MODEL` maps the `"M5StickS3"` `GET_BOARD`
+  response to the new entry so the viewer auto-selects the correct model on a
+  live connection. Key `4` selects it manually; `--model 4` is the new CLI
+  option.
+
 - **System Info screens** — four read-only diagnostic pages accessible from the
   Battery screen via a short side-button (BtnB) press. The pages are not part of
   the main front-button cycle; repeated short presses step through them and wrap
