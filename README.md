@@ -111,6 +111,18 @@ CoreS3 uses ESP32-S3, which requires `espressif32@7.x`. PlatformIO downloads it 
 ~/.platformio/penv/bin/pip install intelhex
 ```
 
+### Developer setup (git hooks)
+
+After cloning, run the install script once to activate the pre-commit hook that
+auto-stamps the build number in `src/version.h`:
+
+```bash
+./scripts/install-hooks
+```
+
+The hook increments `FW_VERSION` from `"MAJOR.MINOR"` to `"MAJOR.MINOR.NNN"` on
+every commit, where NNN is the total commit count. It is safe to re-run.
+
 ## Screens
 
 The **M5 front button** cycles through screens in order:

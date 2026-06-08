@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Symlink version-controlled hooks into .git/hooks/.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+HOOKS_SRC="$REPO_ROOT/scripts/hooks"
+HOOKS_DST="$REPO_ROOT/.git/hooks"
+
+for hook in "$HOOKS_SRC"/*; do
+    name="$(basename "$hook")"
+    target="$HOOKS_DST/$name"
+    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$hook" ]]; then
+        echo "install-hooks: $name already installed, skipping"
+    else
+        ln -sf "$hook" "$target"
+        echo "install-hooks: installed $name -> $hook"
+    fi
+done
+echo "install-hooks: done."
