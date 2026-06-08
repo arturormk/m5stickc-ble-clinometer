@@ -5,9 +5,10 @@
 #include <time.h>
 
 void Display::begin() {
-    bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
-                  || M5.getBoard() == m5::board_t::board_M5StickCPlus);
-    M5.Display.setRotation(isStickC ? 3 : 1);
+    bool isStick = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
+                 || M5.getBoard() == m5::board_t::board_M5StickCPlus
+                 || M5.getBoard() == m5::board_t::board_M5StickS3);
+    M5.Display.setRotation(isStick ? 3 : 1);
     M5.Display.setBrightness(BRIGHTNESS_FULL);
     _lastTiltActivityMs = millis();
     _W = M5.Display.width();

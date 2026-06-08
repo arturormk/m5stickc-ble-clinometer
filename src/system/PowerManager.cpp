@@ -18,6 +18,7 @@ void PowerManager::begin() {
             { m5::board_t::board_M5StickCPlus,  100 },
             { m5::board_t::board_M5Stack,        40 },
             { m5::board_t::board_M5StackCore2,   40 },
+            { m5::board_t::board_M5StackCoreS3,  40 },
         };
         uint8_t vol = 50;
         m5::board_t b = M5.getBoard();

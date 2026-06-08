@@ -1,6 +1,6 @@
 # M5 Bluetooth Clinometer
 
-A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices (M5StickC Plus 2, Core2, CoreS3, Grey). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
+A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices (M5StickC Plus 2, M5StickS3, Core2, CoreS3, Grey). Used to align a NexStar Alt/Az GoTo telescope mount and display live coordinates sent from a Raspberry Pi.
 
 ![Bubble Level](docs/images/clinometer_bubble.png)
 
@@ -84,6 +84,7 @@ This is a [PlatformIO](https://platformio.org/) project targeting the Arduino fr
 ```bash
 ./flash                  # build + flash to m5stickc-plus2 (default)
 ./flash m5stickc-plus2
+./flash mstickS3
 ./flash m5stack-core2
 ./flash m5stack-grey
 ./flash m5stack-cores3
@@ -96,9 +97,10 @@ Compilation is incremental — only changed files are recompiled. The script rep
 
 | Environment | Board | Platform |
 |---|---|---|
-| `m5stickc-plus2` | M5StickC Plus 2 | espressif32 @ 6.1.0 |
-| `m5stack-core2` | M5Stack Core2 | espressif32 @ 6.1.0 |
-| `m5stack-grey` | M5Stack Grey | espressif32 @ 6.1.0 |
+| `m5stickc-plus2` | M5StickC Plus 2 | espressif32 @ 7.x |
+| `mstickS3` | M5StickS3 | espressif32 @ 7.x |
+| `m5stack-core2` | M5Stack Core2 | espressif32 @ 7.x |
+| `m5stack-grey` | M5Stack Grey | espressif32 @ 7.x |
 | `m5stack-cores3` | M5Stack CoreS3 | espressif32 @ 7.x |
 
 The source uses **M5Unified** (`m5stack/M5Unified`) rather than the device-specific `M5StickCPlus2` library. `M5.Imu.isEnabled()` and `M5.Speaker.isEnabled()` guards are used throughout so the firmware degrades gracefully on boards that lack an IMU or speaker — the clinometer screen shows `IMU N/A` and BEEP commands are silently skipped. The display layout adapts to the actual screen dimensions reported by `M5.Display` after `setRotation()`: all pixel coordinates, margins, bar sizes, and bubble radii are derived from `width()` and `height()` at start-up, so the same code renders correctly on the M5StickC Plus 2 (240×135) and on larger displays such as the Core2 or CoreS3 (320×240).
@@ -303,6 +305,7 @@ See [`docs/adr/0002-angle-convention.md`](docs/adr/0002-angle-convention.md) for
 | Device family | UX +X direction in IMU | UX +Y direction in IMU |
 |---|---|---|
 | M5StickC Plus / Plus2 (landscape) | IMU +Y | IMU −X |
+| M5StickS3 (landscape) | IMU −X | IMU −Y |
 | Core2, CoreS3, Grey, others | IMU +X | IMU +Y |
 
 After remapping, pitch and roll are computed identically for all devices using the configured axis codes.

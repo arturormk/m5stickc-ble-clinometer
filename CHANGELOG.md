@@ -20,6 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response can become accidental noise. The stop round-trip uses the precise
   prefix `"OK STREAM 0"` in both tests.
 
+- **Firmware / M5StickS3** — corrected screen orientation and IMU-to-UX axis
+  mapping. The display now uses `setRotation(3)` (same as the StickC Plus
+  family), placing the blue button on the right — consistent with the
+  M5StickC Plus 2 and keeping the USB-port recess on the same edge for
+  telescope-ring mounting. The IMU axis mapping is updated to match:
+  UX +X = IMU −X, UX +Y = IMU −Y, UX +Z = IMU +Z (hardware-verified).
+  Previously the device used `setRotation(1)` (button on left) with an
+  identity UX ↔ IMU mapping. `docs/adr/m5_imu_axes.jpg` is updated to
+  include the StickS3 axis diagram.
+  Contributed by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
+- **Firmware / M5StackCoreS3** — speaker volume now initialised to 40 for
+  `board_M5StackCoreS3`, consistent with Core2 and Grey. Previously this
+  board fell through to the 50-volume default.
+  Contributed by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
 - **Firmware** — BLE command processing no longer runs inside the Bluedroid
   `onWrite()` callback. Previously, all command dispatch — float formatting,
   `snprintf`, sidereal arithmetic, NVS calls — executed synchronously on the

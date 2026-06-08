@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VALID_ENVS=(m5stickc-plus2 m5stack-core2 m5stack-grey m5stack-cores3)
+VALID_ENVS=(m5stickc-plus2 mstickS3 m5stack-core2 m5stack-grey m5stack-cores3)
 DEFAULT_ENV="m5stickc-plus2"
 PIO="$HOME/.platformio/penv/bin/pio"
 

@@ -66,13 +66,20 @@ void ImuManager::update(DeviceState& state) {
     // M5StickC Plus / Plus2 (landscape, M5 button left):
     //   UX +X = IMU +Y,  UX +Y = IMU -X,  UX +Z = IMU +Z
     //
-    // Core2 / CoreS3 (screen axes align with IMU axes):
+    // M5StickS3 (landscape, setRotation(3) same as StickC; overridden below):
+    //   UX +X = IMU -X,  UX +Y = IMU -Y,  UX +Z = IMU +Z
+    //
+    // Core2 / CoreS3 / Grey (screen axes align with IMU axes):
     //   UX +X = IMU +X,  UX +Y = IMU +Y,  UX +Z = IMU +Z
     bool isStickC = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
                   || M5.getBoard() == m5::board_t::board_M5StickCPlus);
     float gux = isStickC ?  gcy : gcx;   // UX X component (screen right)
     float guy = isStickC ? -gcx : gcy;   // UX Y component (screen up)
     float guz = gcz;                     // UX Z component (out of screen)
+    if (M5.getBoard() == m5::board_t::board_M5StickS3) {
+        gux = -gcx;
+        guy = -gcy;
+    }
     state.upsideDown = (guz < 0.0f);
 
     // Standard UX tilt angles for bubble display. Convention: positive = high side rises.
