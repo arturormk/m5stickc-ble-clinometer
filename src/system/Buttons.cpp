@@ -15,7 +15,8 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
                 state.pendingBleEventReady = true;
             }
         } else if (state.screenIndex != SCREEN_MESSAGE) {
-            state.screenIndex = (state.screenIndex + 1) % 5;
+            int from = (state.screenIndex >= SCREEN_SYSINFO_1) ? SCREEN_BATTERY : state.screenIndex;
+            state.screenIndex = (from + 1) % 5;
         }
     }
 
@@ -32,7 +33,13 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
         if (_topHeld) {
             _topHeld = false;
             if ((millis() - _topPressStartMs) < LONG_PRESS_MS) {
-                if (M5.getBoard() != m5::board_t::board_M5StackCore2) {
+                if (state.screenIndex == SCREEN_BATTERY) {
+                    state.screenIndex = SCREEN_SYSINFO_1;
+                } else if (state.screenIndex >= SCREEN_SYSINFO_1 && state.screenIndex < SCREEN_SYSINFO_LAST) {
+                    state.screenIndex++;
+                } else if (state.screenIndex == SCREEN_SYSINFO_LAST) {
+                    state.screenIndex = SCREEN_BATTERY;
+                } else if (M5.getBoard() != m5::board_t::board_M5StackCore2) {
                     power.reboot();
                 }
             }

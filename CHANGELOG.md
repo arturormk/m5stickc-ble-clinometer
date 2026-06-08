@@ -56,6 +56,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
 
 ### Added
+- **System Info screens** — three read-only diagnostic pages accessible from the
+  Battery screen via a short side-button (BtnB) press. The pages are not part of
+  the main front-button cycle; repeated short presses step through them and wrap
+  back to Battery.
+  - **Page 1/3 — Runtime:** firmware version, uptime, free heap, IMU die
+    temperature (°C, from the MPU6886/BMI270 on-die sensor), and battery
+    charging state (CHG/DSG from the PMIC; `--` on boards that use a plain ADC
+    for battery measurement, such as the M5StickC Plus 2, where no charging
+    status is available through the SDK).
+  - **Page 2/3 — Memory:** heap total, free, min-free watermark, max-alloc block,
+    and PSRAM free (shown as `none` on boards without PSRAM).
+  - **Page 3/3 — Chip:** chip model and revision, core count and CPU frequency,
+    flash chip size, sketch used/free, IDF SDK version.
+  - Pressing the front button from any System Info page advances to the
+    Clinometer screen (same as pressing it from Battery).
+  - The Battery screen shows a `"B: system info"` hint at the bottom.
+  - Firmware version display moved from the Battery screen to System Info page 1.
+
 - **M5StickS3 support** — new `[env:mstickS3]` PlatformIO environment for the
   M5StickS3 (ESP32-S3, 8 MB flash, PSRAM). Includes the flags required for
   correct operation: `BOARD_HAS_PSRAM`, `-mfix-esp32-psram-cache-issue`,

@@ -85,6 +85,10 @@ void Display::update(const DeviceState& state) {
         case SCREEN_ALTAZ:      _drawAltAz(state);      break;
         case SCREEN_BATTERY:    _drawBattery(state);    break;
         case SCREEN_MESSAGE:    _drawMessage(state);    break;
+        case SCREEN_SYSINFO_1:
+        case SCREEN_SYSINFO_2:
+        case SCREEN_SYSINFO_3:
+            _drawSysInfo(state, state.screenIndex - SCREEN_SYSINFO_1 + 1); break;
         default: break;
     }
 
@@ -569,13 +573,185 @@ void Display::_drawBattery(const DeviceState& state) {
         _sprite->drawString("--%", pctX, readY);
     }
 
-    int verY = _H * 125 / 135;
-    int verX = _W / 2;
+    // Hint that BtnB cycles through system info pages
     _sprite->setFont(&fonts::Font2);
-    _sprite->setTextColor(_c(TFT_CYAN, n));
-    _sprite->setTextDatum(textdatum_t::middle_center);
-    _sprite->drawString("Firmware ver " FW_VERSION, verX, verY);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
+    _sprite->setTextDatum(textdatum_t::bottom_center);
+    _sprite->drawString("B: system info", _W / 2, _H - 2);
 
+    _sprite->setTextDatum(textdatum_t::top_left);
+}
+
+void Display::_drawSysInfo(const DeviceState& state, int page) {
+    bool n = state.nightMode;
+
+    // Title
+    _sprite->setFont(&fonts::Font4);
+    _sprite->setTextColor(_c(TFT_CYAN, n));
+    _sprite->setTextDatum(textdatum_t::top_center);
+    _sprite->drawString("SYSTEM INFO", _W / 2, _H * 4 / 135);
+    _sprite->setTextDatum(textdatum_t::top_left);
+
+    const int lx   = _W * 10 / 240;
+    const int vx   = _W * 90 / 240;
+    const int row0 = _H * 28 / 135;
+    const int rowH = _H * 19 / 135;
+
+    _sprite->setFont(&fonts::Font2);
+
+    // --- Page 1: runtime ---
+    if (page == 1) {
+        // FW version
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("FW", lx, row0);
+        _sprite->setTextColor(_c(TFT_CYAN, n));
+        _sprite->drawString(FW_VERSION, vx, row0);
+
+        // Uptime
+        uint32_t sec = millis() / 1000;
+        uint32_t h   = sec / 3600; sec %= 3600;
+        uint32_t m   = sec / 60;   sec %= 60;
+        char upBuf[20];
+        snprintf(upBuf, sizeof(upBuf), "%luh %02lum %02lus",
+                 (unsigned long)h, (unsigned long)m, (unsigned long)sec);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Up", lx, row0 + rowH);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(upBuf, vx, row0 + rowH);
+
+        // Free heap (quick view)
+        char heapBuf[24];
+        snprintf(heapBuf, sizeof(heapBuf), "%lu kB free",
+                 (unsigned long)ESP.getFreeHeap() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Heap", lx, row0 + rowH * 2);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(heapBuf, vx, row0 + rowH * 2);
+
+        // IMU die temperature
+        float imuTemp = 0.0f;
+        bool  hasTemp = M5.Imu.getTemp(&imuTemp);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Temp", lx, row0 + rowH * 3);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        if (hasTemp) {
+            char tempBuf[16];
+            snprintf(tempBuf, sizeof(tempBuf), "%.1f C", imuTemp);
+            _sprite->drawString(tempBuf, vx, row0 + rowH * 3);
+        } else {
+            _sprite->drawString("N/A", vx, row0 + rowH * 3);
+        }
+
+        // Battery charging state; append current only if PMIC provides it
+        auto    chgState = M5.Power.isCharging();
+        int32_t batMa    = M5.Power.getBatteryCurrent();
+        char    batBuf[24];
+        bool    chgKnown = (chgState != m5::Power_Class::charge_unknown);
+        if (!chgKnown && batMa == 0) {
+            snprintf(batBuf, sizeof(batBuf), "--");  // no PMIC on this board
+        } else {
+            const char* chgLabel =
+                (chgState == m5::Power_Class::is_charging)    ? "CHG" :
+                (chgState == m5::Power_Class::is_discharging) ? "DSG" : "?";
+            if (batMa != 0) {
+                snprintf(batBuf, sizeof(batBuf), "%s %+ld mA", chgLabel, (long)batMa);
+            } else {
+                snprintf(batBuf, sizeof(batBuf), "%s", chgLabel);
+            }
+        }
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Batt", lx, row0 + rowH * 4);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(batBuf, vx, row0 + rowH * 4);
+
+    // --- Page 2: memory detail ---
+    } else if (page == 2) {
+        char buf[32];
+
+        snprintf(buf, sizeof(buf), "%lu kB", (unsigned long)ESP.getHeapSize() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Total", lx, row0);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0);
+
+        snprintf(buf, sizeof(buf), "%lu kB", (unsigned long)ESP.getFreeHeap() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Free", lx, row0 + rowH);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH);
+
+        snprintf(buf, sizeof(buf), "%lu kB", (unsigned long)ESP.getMinFreeHeap() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("MinFree", lx, row0 + rowH * 2);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH * 2);
+
+        snprintf(buf, sizeof(buf), "%lu kB", (unsigned long)ESP.getMaxAllocHeap() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("MaxBlk", lx, row0 + rowH * 3);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH * 3);
+
+        uint32_t psram = ESP.getFreePsram();
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("PSRAM", lx, row0 + rowH * 4);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        if (psram > 0) {
+            snprintf(buf, sizeof(buf), "%lu kB", (unsigned long)psram / 1024);
+            _sprite->drawString(buf, vx, row0 + rowH * 4);
+        } else {
+            _sprite->drawString("none", vx, row0 + rowH * 4);
+        }
+
+    // --- Page 3: chip & flash ---
+    } else {
+        char buf[32];
+
+        // Chip model + revision
+        snprintf(buf, sizeof(buf), "%s r%u", ESP.getChipModel(), ESP.getChipRevision());
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Chip", lx, row0);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0);
+
+        // Cores + CPU freq
+        snprintf(buf, sizeof(buf), "%u core  %lu MHz",
+                 ESP.getChipCores(), (unsigned long)ESP.getCpuFreqMHz());
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("CPU", lx, row0 + rowH);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH);
+
+        // Flash size
+        snprintf(buf, sizeof(buf), "%lu MB", (unsigned long)ESP.getFlashChipSize() / 1024 / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Flash", lx, row0 + rowH * 2);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH * 2);
+
+        // Sketch used / free
+        snprintf(buf, sizeof(buf), "%lu / %lu kB",
+                 (unsigned long)ESP.getSketchSize()      / 1024,
+                 (unsigned long)ESP.getFreeSketchSpace() / 1024);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("Sketch", lx, row0 + rowH * 3);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(buf, vx, row0 + rowH * 3);
+
+        // SDK version
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->drawString("IDF", lx, row0 + rowH * 4);
+        _sprite->setTextColor(_c(TFT_WHITE, n));
+        _sprite->drawString(ESP.getSdkVersion(), vx, row0 + rowH * 4);
+    }
+
+    // Page indicator  "1/3"
+    char pageBuf[4];
+    snprintf(pageBuf, sizeof(pageBuf), "%d/3", page);
+    _sprite->setFont(&fonts::Font2);
+    _sprite->setTextColor(_c(TFT_DARKGREY, n));
+    _sprite->setTextDatum(textdatum_t::bottom_right);
+    _sprite->drawString(pageBuf, _W - _W * 14 / 240, _H - 2);
     _sprite->setTextDatum(textdatum_t::top_left);
 }
 

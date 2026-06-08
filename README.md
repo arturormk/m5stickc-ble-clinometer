@@ -121,8 +121,20 @@ The **M5 front button** cycles through screens in order:
 | 1 | Time | Current time HH:MM:SS; timezone/LST label centered in cyan at the top (if set). Solar: date below the digits. Sidereal: no date. |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
-| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%) |
+| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%); `"B: system info"` hint at the bottom |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
+
+### System Info pages
+
+A short press of the **side button (BtnB)** from the Battery screen enters a set of read-only diagnostic pages. These are not part of the front-button cycle. Repeated short presses advance through the pages and wrap back to Battery.
+
+| Page | Content |
+|---|---|
+| 1/3 — Runtime | Firmware version · uptime · free heap · IMU die temperature (°C) · battery charging state (CHG/DSG from PMIC; `--` on boards without a PMIC) |
+| 2/3 — Memory | Heap: total · free · min-free watermark · max-alloc block · PSRAM free (or `none`) |
+| 3/3 — Chip | Chip model and revision · core count and CPU frequency · flash size · sketch used/free · IDF SDK version |
+
+Pressing the front button from any System Info page advances to the Clinometer screen, the same as pressing it from Battery.
 
 ### Status indicators
 
@@ -134,9 +146,8 @@ Two persistent indicators appear on every screen:
 
 | Button | Short press | Long press (≥2 s) |
 |---|---|---|
-| M5 (front) | Cycle to next screen | — |
-| Top (side) | Reboot | Power off (AXP192 shutdown) |
-| Power (reserved) | — | — |
+| M5 (front) | Cycle to next screen (Clinometer→Time→RA/Dec→Alt/Az→Battery→…); from a System Info page: advance to Clinometer | — |
+| Top (side) | **Battery or System Info page:** advance to next System Info page (wraps back to Battery after page 3); **any other screen:** reboot | Power off |
 
 When a `SHOW_MSG_WAIT` message is active, pressing the M5 button (if it is in the watch list) sends a `EVENT BUTTON M5` notification over BLE instead of cycling screens.
 
@@ -1413,7 +1424,7 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   └── BleManager.cpp GATT server, command parser, response/event notify
 │   ├── ui/
 │   │   ├── Display.h
-│   │   └── Display.cpp    All six screen renderers (sprite-buffered via M5GFX)
+│   │   └── Display.cpp    Screen renderers: six main screens + three System Info pages (sprite-buffered via M5GFX)
 │   └── system/
 │       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, power-off
 │       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
