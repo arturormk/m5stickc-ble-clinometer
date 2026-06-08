@@ -57,10 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
 - **Firmware / M5StickS3** — BLE commands intermittently hung on the
-  M5StickS3. The root cause was the Bluedroid BTC FreeRTOS task running with
-  an insufficient default stack (~4 KB). The new `[env:mstickS3]` build sets
-  `-DCONFIG_BT_BTC_TASK_STACK_SIZE=10240` (10 KB), resolving the stall.
-  A secondary fix makes the two local buffers inside `processCommand()`
+  M5StickS3. The fix makes the two local buffers inside `processCommand()`
   (`cmd[256]` and `resp[160]`) `static`, removing 416 bytes of stack pressure
   from the Arduino loop task on every command dispatch. Both buffers are fully
   overwritten at the start of each call so the change is semantically neutral.
@@ -72,22 +69,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
 
 ### Added
-- **System Info screens** — three read-only diagnostic pages accessible from the
+- **System Info screens** — four read-only diagnostic pages accessible from the
   Battery screen via a short side-button (BtnB) press. The pages are not part of
   the main front-button cycle; repeated short presses step through them and wrap
   back to Battery.
-  - **Page 1/3 — Runtime:** firmware version, uptime, free heap, IMU die
-    temperature (°C, from the MPU6886/BMI270 on-die sensor), and battery
-    charging state (CHG/DSG from the PMIC; `--` on boards that use a plain ADC
-    for battery measurement, such as the M5StickC Plus 2, where no charging
-    status is available through the SDK).
-  - **Page 2/3 — Memory:** heap total, free, min-free watermark, max-alloc block,
+  - **Page 1/4 — STATUS:** firmware version, uptime, IMU die temperature (°C,
+    from the MPU6886/BMI270 on-die sensor), and battery charging state (CHG/DSG
+    from the PMIC; `--` on boards that use a plain ADC for battery measurement,
+    such as the M5StickC Plus 2, where no charging status is available through
+    the SDK).
+  - **Page 2/4 — STACK:** loop-task and BTC-task stack high-water marks shown as
+    peak-used / total bytes (`uxTaskGetStackHighWaterMark × sizeof(StackType_t)`)
+    with a colour-coded 10-segment bar each (dark green ≤ 60%, amber ≤ 80%, red
+    above 80%). The BTC-task row is only shown on builds where
+    `CONFIG_BT_BTC_TASK_STACK_SIZE` is defined (M5StickS3).
+  - **Page 3/4 — HEAP:** heap total, free, min-free watermark, max-alloc block,
     and PSRAM free (shown as `none` on boards without PSRAM).
-  - **Page 3/3 — Chip:** chip model and revision, core count and CPU frequency,
-    flash chip size, sketch used/free, IDF SDK version.
+  - **Page 4/4 — SYSTEM INFO:** chip model and revision, core count and CPU
+    frequency, flash chip size, sketch used/free, IDF SDK version.
   - Pressing the front button from any System Info page advances to the
     Clinometer screen (same as pressing it from Battery).
-  - The Battery screen shows a `"B: system info"` hint at the bottom.
   - Firmware version display moved from the Battery screen to System Info page 1.
 
 - **M5StickS3 support** — new `[env:mstickS3]` PlatformIO environment for the
@@ -193,21 +194,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Battery screen** — navigation hint replaced: the centred `"B: system info"` text at the
-  bottom is now a compact `[B]` icon at the bottom-right corner, freeing the bottom edge for
-  content.  A **stack high-water mark bar** (10 small segments, dark green = free headroom,
-  dark red = peak-used headroom) is displayed at the bottom of the Battery screen with a
-  right-aligned `Stack` label.  The bar uses `CONFIG_ARDUINO_LOOP_STACK_SIZE` (8 192 B) as
-  the loop-task total — correcting a reference to `CONFIG_BT_BTC_TASK_STACK_SIZE` in the
-  original contribution by [@senshu-hiro2](https://github.com/senshu-hiro2) that used the
-  Bluetooth-task stack size instead of the Arduino loop-task stack size.  The battery bar and
-  voltage/percentage readout are shifted up slightly to accommodate the new bottom strip.
-- **System Info page 1/3 (Runtime)** — "Heap" row replaced by a "Stack" row that shows the
-  loop-task **peak-ever-used / total** stack in bytes
-  (`uxTaskGetStackHighWaterMark(NULL) × sizeof(StackType_t)`).  Heap detail (total, free,
-  min-free watermark, max-alloc block, PSRAM) is already present on page 2/3 and does not
-  need a summary on page 1.
-- **System Info page 2/3** — title now reads `HEAP` instead of the generic `SYSTEM INFO`,
-  making the page's subject immediately clear.
+  bottom is now a compact `[B]` icon at the bottom-right corner.
+- **System Info screens** — expanded from three pages to four. A dedicated
+  **STACK page (2/4)** was inserted between STATUS (1/4) and HEAP (3/4); the old
+  Chip page shifts to 4/4 and retains the title `SYSTEM INFO`. Each page title is
+  now displayed in the header so the subject is immediately clear on entry.
 - CI: add `workflow_dispatch` trigger so releases can be created manually from
   the GitHub Actions UI without pushing a tag.
 

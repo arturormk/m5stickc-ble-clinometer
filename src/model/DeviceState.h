@@ -29,7 +29,8 @@ struct MelodyNote {
 #define SCREEN_SYSINFO_1   6   // secondary pages; reachable only via BtnB short press from BATTERY
 #define SCREEN_SYSINFO_2   7
 #define SCREEN_SYSINFO_3   8
-#define SCREEN_SYSINFO_LAST SCREEN_SYSINFO_3
+#define SCREEN_SYSINFO_4   9
+#define SCREEN_SYSINFO_LAST SCREEN_SYSINFO_4
 
 // Button bitmask constants
 #define BTN_MASK_M5  0x01
