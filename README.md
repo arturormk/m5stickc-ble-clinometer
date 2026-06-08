@@ -133,7 +133,7 @@ The **M5 front button** cycles through screens in order:
 | 1 | Time | Current time HH:MM:SS; timezone/LST label centered in cyan at the top (if set). Solar: date below the digits. Sidereal: no date. |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
-| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%); `"B: system info"` hint at the bottom |
+| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%); stack high-water mark bar (dark green/red segments) at the bottom with a `Stack` label; `[B]` nav icon at bottom-right |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
 
 ### System Info pages
@@ -142,8 +142,8 @@ A short press of the **side button (BtnB)** from the Battery screen enters a set
 
 | Page | Content |
 |---|---|
-| 1/3 — Runtime | Firmware version · uptime · free heap · IMU die temperature (°C) · battery charging state (CHG/DSG from PMIC; `--` on boards without a PMIC) |
-| 2/3 — Memory | Heap: total · free · min-free watermark · max-alloc block · PSRAM free (or `none`) |
+| 1/3 — Runtime | Firmware version · uptime · loop-task stack peak-used/total (B) · IMU die temperature (°C) · battery charging state (CHG/DSG from PMIC; `--` on boards without a PMIC) |
+| 2/3 — Heap | Heap: total · free · min-free watermark · max-alloc block · PSRAM free (or `none`) |
 | 3/3 — Chip | Chip model and revision · core count and CPU frequency · flash size · sketch used/free · IDF SDK version |
 
 Pressing the front button from any System Info page advances to the Clinometer screen, the same as pressing it from Battery.

@@ -521,12 +521,12 @@ void Display::_drawBattery(const DeviceState& state) {
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setTextDatum(textdatum_t::top_center);
-    _sprite->drawString("BATTERY", _W / 2, _H * 20 / 135);
+    _sprite->drawString("BATTERY", _W / 2, _H * 12 / 135); // [exp↕] was: *20/135
     _sprite->setTextDatum(textdatum_t::top_left);
 
     // Bar geometry
     const int BAR_X = _W * 18 / 240;
-    const int BAR_Y = _H * 53 / 135;
+    const int BAR_Y = _H * 45 / 135; // [exp↕] was: *53/135
     const int BAR_W = _W * 192 / 240;
     const int BAR_H = _H * 28 / 135;
     const int TIP_H = BAR_H / 2;
@@ -550,7 +550,7 @@ void Display::_drawBattery(const DeviceState& state) {
     }
 
     // Voltage and percentage below the bar, positioned relative to it
-    int readY = _H * 104 / 135;
+    int readY = _H * 96 / 135; // [exp↕] was: *104/135
     int voltX = BAR_X + BAR_W * 3 / 8;
     int pctX  = BAR_X + BAR_W * 6 / 8;
 
@@ -573,13 +573,27 @@ void Display::_drawBattery(const DeviceState& state) {
         _sprite->drawString("--%", pctX, readY);
     }
 
-    // Hint that BtnB cycles through system info pages
+    // [B] nav hint — bottom-right
     _sprite->setFont(&fonts::Font2);
     _sprite->setTextColor(_c(TFT_DARKGREY, n));
-    _sprite->setTextDatum(textdatum_t::bottom_center);
-    _sprite->drawString("B: system info", _W / 2, _H - 2);
-
+    _sprite->setTextDatum(textdatum_t::bottom_right);
+    _sprite->drawString("[B]", _W - _W * 4 / 240, _H - 2);
     _sprite->setTextDatum(textdatum_t::top_left);
+
+    // "Stack" label + high-water mark bar — bottom strip  // [exp↕] was: top row
+    {
+        uint32_t freeStackBytes = (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        int stacklvl = (int)map((long)freeStackBytes, 0L, (long)CONFIG_ARDUINO_LOOP_STACK_SIZE, 0L, 100L);
+        _sprite->setFont(&fonts::Font2);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        _sprite->setTextDatum(textdatum_t::middle_right);
+        _sprite->drawString("Stack", _W / 3 - _W * 4 / 240, _H * 119 / 135); // [exp↕] was: 9
+        _sprite->setTextDatum(textdatum_t::top_left);
+        int px = _W / 3;
+        for (int i = 0; i < 10; i++)
+            _sprite->fillRect(px + i * 9, _H * 116 / 135, 6, 6, // [exp↕] was: 6
+                              stacklvl >= i * 10 ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_MAROON);
+    }
 }
 
 void Display::_drawSysInfo(const DeviceState& state, int page) {
@@ -589,7 +603,7 @@ void Display::_drawSysInfo(const DeviceState& state, int page) {
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setTextDatum(textdatum_t::top_center);
-    _sprite->drawString("SYSTEM INFO", _W / 2, _H * 4 / 135);
+    _sprite->drawString(page == 2 ? "HEAP" : "SYSTEM INFO", _W / 2, _H * 4 / 135);
     _sprite->setTextDatum(textdatum_t::top_left);
 
     const int lx   = _W * 10 / 240;
@@ -619,14 +633,16 @@ void Display::_drawSysInfo(const DeviceState& state, int page) {
         _sprite->setTextColor(_c(TFT_WHITE, n));
         _sprite->drawString(upBuf, vx, row0 + rowH);
 
-        // Free heap (quick view)
-        char heapBuf[24];
-        snprintf(heapBuf, sizeof(heapBuf), "%lu kB free",
-                 (unsigned long)ESP.getFreeHeap() / 1024);
+        // Loop-task stack high-water mark: peak used = total - min_ever_free
+        uint32_t freeStackBytes = (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        uint32_t usedStackBytes = CONFIG_ARDUINO_LOOP_STACK_SIZE - freeStackBytes;
+        char stackBuf[24];
+        snprintf(stackBuf, sizeof(stackBuf), "%lu / %u B",
+                 (unsigned long)usedStackBytes, CONFIG_ARDUINO_LOOP_STACK_SIZE);
         _sprite->setTextColor(_c(TFT_DARKGREY, n));
-        _sprite->drawString("Heap", lx, row0 + rowH * 2);
+        _sprite->drawString("Stack", lx, row0 + rowH * 2);
         _sprite->setTextColor(_c(TFT_WHITE, n));
-        _sprite->drawString(heapBuf, vx, row0 + rowH * 2);
+        _sprite->drawString(stackBuf, vx, row0 + rowH * 2);
 
         // IMU die temperature
         float imuTemp = 0.0f;

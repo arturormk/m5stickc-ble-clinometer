@@ -176,6 +176,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
 ### Changed
+- **Battery screen** — navigation hint replaced: the centred `"B: system info"` text at the
+  bottom is now a compact `[B]` icon at the bottom-right corner, freeing the bottom edge for
+  content.  A **stack high-water mark bar** (10 small segments, dark green = free headroom,
+  dark red = peak-used headroom) is displayed at the bottom of the Battery screen with a
+  right-aligned `Stack` label.  The bar uses `CONFIG_ARDUINO_LOOP_STACK_SIZE` (8 192 B) as
+  the loop-task total — correcting a reference to `CONFIG_BT_BTC_TASK_STACK_SIZE` in the
+  original contribution by [@senshu-hiro2](https://github.com/senshu-hiro2) that used the
+  Bluetooth-task stack size instead of the Arduino loop-task stack size.  The battery bar and
+  voltage/percentage readout are shifted up slightly to accommodate the new bottom strip.
+- **System Info page 1/3 (Runtime)** — "Heap" row replaced by a "Stack" row that shows the
+  loop-task **peak-ever-used / total** stack in bytes
+  (`uxTaskGetStackHighWaterMark(NULL) × sizeof(StackType_t)`).  Heap detail (total, free,
+  min-free watermark, max-alloc block, PSRAM) is already present on page 2/3 and does not
+  need a summary on page 1.
+- **System Info page 2/3** — title now reads `HEAP` instead of the generic `SYSTEM INFO`,
+  making the page's subject immediately clear.
 - CI: add `workflow_dispatch` trigger so releases can be created manually from
   the GitHub Actions UI without pushing a tag.
 
