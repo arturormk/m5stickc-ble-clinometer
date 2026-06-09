@@ -212,6 +212,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
 ### Changed
+- **STACK page** — each task block now shows a small `heap: N B` annotation
+  (Font0, dark grey) between the peak-used/total text line and the bar. The
+  value comes from `heap_caps_get_allocated_size(pxTaskGetStackStart(handle))`
+  and reflects the actual heap block committed to the task stack by the ESP32
+  TLSF allocator — always slightly larger than the configured size due to
+  free-list block rounding (~512 B on typical builds). For the BTC task this
+  serves as a runtime sanity check: the bar's denominator is
+  `CONFIG_BT_BTC_TASK_STACK_SIZE`, but that task's stack is precompiled into
+  `libbt.a` and cannot actually be changed by redefining the macro. If the
+  macro value and the `heap:` annotation diverge significantly, the config is
+  misleading and the bar scale is wrong. Bar colours brightened from
+  `TFT_DARKGREEN` (~40% RGB565 saturation) to 75% for all three threshold
+  levels; thresholds unchanged (green ≤ 60%, amber ≤ 80%, red > 80%).
 - **Battery screen** — navigation hint replaced: the centred `"B: system info"` text at the
   bottom is now a compact `[B]` icon at the bottom-right corner.
 - **System Info screens** — expanded from three pages to four. A dedicated

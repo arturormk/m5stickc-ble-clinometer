@@ -106,6 +106,7 @@ struct DeviceState {
     volatile bool pendingBleEventReady;
     volatile int16_t pendingBleHelpLine;  // -1 = idle; 0..N = next line to send; N+1 = send "OK"
     volatile bool bleClientWantsNewline;
+
 };
 
 // Returns current UTC epoch, advancing from the anchor.

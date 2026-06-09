@@ -145,7 +145,7 @@ A short press of the **side button (BtnB)** from the Battery screen enters a set
 | Page | Content |
 |---|---|
 | 1/4 — STATUS | Firmware version · uptime · IMU die temperature (°C) · battery charging state (CHG/DSG from PMIC; `--` on boards without a PMIC) |
-| 2/4 — STACK | Loop-task and BTC-task stack high-water marks: peak-used / total bytes with colour-coded 10-segment bar each. BTC row only shown on builds where `CONFIG_BT_BTC_TASK_STACK_SIZE` is defined. |
+| 2/4 — STACK | Loop-task and BTC-task stack high-water marks: peak-used / total bytes with colour-coded 10-segment bar each. Between the text line and the bar, a small `heap: N B` annotation shows the actual heap block size allocated for the task stack (`heap_caps_get_allocated_size`), which is always slightly larger than the configured size due to TLSF allocator block rounding. For the BTC task this is a runtime sanity check: the bar denominator is `CONFIG_BT_BTC_TASK_STACK_SIZE`, but that task's stack is precompiled into `libbt.a` and cannot be changed by redefining the macro — if the two values diverge significantly, the config is misleading. BTC row only shown on builds where `CONFIG_BT_BTC_TASK_STACK_SIZE` is defined. |
 | 3/4 — HEAP | Heap: total · free · min-free watermark · max-alloc block · PSRAM free (or `none`) |
 | 4/4 — SYSTEM INFO | Chip model and revision · core count and CPU frequency · flash size · sketch used/free · IDF SDK version |
 

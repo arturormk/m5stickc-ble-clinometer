@@ -1,5 +1,6 @@
 #include "Display.h"
 #include "../version.h"
+#include "esp_heap_caps.h"
 #include <lgfx/Fonts/GFXFF/FreeSans9pt7b.h>
 #include <math.h>
 #include <time.h>
@@ -659,40 +660,55 @@ void Display::_drawSysInfo(const DeviceState& state, int page) {
     // --- Page 2: stack high-water marks ---
     } else if (page == 2) {
         char buf[32];
+        // 75%-brightness bar colours (RGB565: R=23/31, G=47/63, B scaled)
+        static constexpr uint16_t kBarGreen  = 0x05E0u;
+        static constexpr uint16_t kBarYellow = 0xBDE0u;
+        static constexpr uint16_t kBarRed    = 0xB800u;
 
         uint32_t ardFree  = (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
         uint32_t ardTotal = CONFIG_ARDUINO_LOOP_STACK_SIZE;
+        uint32_t ardAlloc = (uint32_t)heap_caps_get_allocated_size(pxTaskGetStackStart(NULL));
         uint32_t ardUsed  = ardTotal - ardFree;
         int      ardPct   = (int)(ardUsed * 100 / ardTotal);
-        uint16_t ardCol   = ardPct > 80 ? _c(TFT_RED, n)
-                          : ardPct > 60 ? _c(TFT_YELLOW, n) : _c(TFT_DARKGREEN, n);
+        uint16_t ardCol   = ardPct > 80 ? _c(kBarRed, n)
+                          : ardPct > 60 ? _c(kBarYellow, n) : _c(kBarGreen, n);
 
         snprintf(buf, sizeof(buf), "%lu/%u B", (unsigned long)ardUsed, ardTotal);
         _sprite->setTextColor(_c(TFT_DARKGREY, n));
         _sprite->drawString("Arduino", lx, row0 + rowH);
         _sprite->setTextColor(_c(TFT_WHITE, n));
         _sprite->drawString(buf, vx, row0 + rowH);
+        _sprite->setFont(&fonts::Font0);
+        _sprite->setTextColor(_c(TFT_DARKGREY, n));
+        snprintf(buf, sizeof(buf), "heap:%lu B", (unsigned long)ardAlloc);
+        _sprite->drawString(buf, vx, row0 + rowH + 16);
         for (int i = 0; i < 10; i++)
-            _sprite->fillRect(vx + i * 9, row0 + rowH + 16, 6, 6,
+            _sprite->fillRect(vx + i * 9, row0 + rowH + 24, 6, 6,
                               ardPct >= (i + 1) * 10 ? ardCol : _c(0x2104u, n));
 
 #ifdef CONFIG_BT_BTC_TASK_STACK_SIZE
+        _sprite->setFont(&fonts::Font2);
         TaskHandle_t btcTask = xTaskGetHandle("BTC_TASK");
         if (btcTask) {
             uint32_t btcFree  = (uint32_t)uxTaskGetStackHighWaterMark(btcTask) * sizeof(StackType_t);
             uint32_t btcTotal = CONFIG_BT_BTC_TASK_STACK_SIZE;
+            uint32_t btcAlloc = (uint32_t)heap_caps_get_allocated_size(pxTaskGetStackStart(btcTask));
             uint32_t btcUsed  = btcFree < btcTotal ? btcTotal - btcFree : 0;
             int      btcPct   = (int)(btcUsed * 100 / btcTotal);
-            uint16_t btcCol   = btcPct > 80 ? _c(TFT_RED, n)
-                              : btcPct > 60 ? _c(TFT_YELLOW, n) : _c(TFT_DARKGREEN, n);
+            uint16_t btcCol   = btcPct > 80 ? _c(kBarRed, n)
+                              : btcPct > 60 ? _c(kBarYellow, n) : _c(kBarGreen, n);
 
             snprintf(buf, sizeof(buf), "%lu/%u B", (unsigned long)btcUsed, btcTotal);
             _sprite->setTextColor(_c(TFT_DARKGREY, n));
             _sprite->drawString("BTC", lx, row0 + rowH * 3);
             _sprite->setTextColor(_c(TFT_WHITE, n));
             _sprite->drawString(buf, vx, row0 + rowH * 3);
+            _sprite->setFont(&fonts::Font0);
+            _sprite->setTextColor(_c(TFT_DARKGREY, n));
+            snprintf(buf, sizeof(buf), "heap:%lu B", (unsigned long)btcAlloc);
+            _sprite->drawString(buf, vx, row0 + rowH * 3 + 16);
             for (int i = 0; i < 10; i++)
-                _sprite->fillRect(vx + i * 9, row0 + rowH * 3 + 16, 6, 6,
+                _sprite->fillRect(vx + i * 9, row0 + rowH * 3 + 24, 6, 6,
                                   btcPct >= (i + 1) * 10 ? btcCol : _c(0x2104u, n));
         }
 #endif
