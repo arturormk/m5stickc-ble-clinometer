@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-10
+
 ### Fixed
 - **Firmware / BLE** — `GET_STATUS` no longer returns `SCREEN=UNKNOWN` when the
   device is on a System Info page (1/4–4/4). `screenName()` now maps

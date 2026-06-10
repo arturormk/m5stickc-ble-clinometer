@@ -21,6 +21,15 @@ if ! grep -qE '#define FW_VERSION "[0-9]+\.[0-9]+' "$VERSION_FILE"; then
     exit 0
 fi
 
+# Even minor versions are release branches — patch is set manually, not stamped.
+MINOR=$(grep -oE '#define FW_VERSION "[0-9]+\.[0-9]+\.' "$VERSION_FILE" \
+        | grep -oE '\.[0-9]+\.' | tr -d '.')
+if [[ -n "$MINOR" ]] && (( MINOR % 2 == 0 )); then
+    CURRENT_VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" | tr -d '"')
+    echo "pre-commit: FW_VERSION is ${CURRENT_VER} (release branch, not stamped)" >&2
+    exit 0
+fi
+
 # Replace "MAJOR.MINOR" or "MAJOR.MINOR.OLD" with "MAJOR.MINOR.BUILD"
 sed -i -E \
     "s/(#define FW_VERSION \")([0-9]+\.[0-9]+)(\.[0-9]+)?(\")/\1\2.${BUILD}\4/" \
