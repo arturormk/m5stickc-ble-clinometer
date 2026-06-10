@@ -98,19 +98,16 @@ M5StickS3 uses the ESP32-S3 chip with octal PSRAM. Three things are required:
 The S3 also uses USB CDC for serial, not UART. Without
 `-DARDUINO_USB_CDC_ON_BOOT=1 -DARDUINO_USB_MODE=1` the serial monitor is silent.
 
-### M5StickS3: BTC task stack overflow
+### M5StickS3: CONFIG_BT_BTC_TASK_STACK_SIZE is read-only
 
-The Bluetooth Controller (BTC) task on the S3 uses a hardcoded stack of 3584 bytes
-in the prebuilt `libbt.a`. Complex BLE operations — particularly during connection
-negotiation — can overflow this stack and cause a reset.
+The BTC task stack is baked into the prebuilt `libbt.a` at **3072 bytes** and cannot
+be changed at build time. `CONFIG_BT_BTC_TASK_STACK_SIZE` is generated when the
+library is compiled only to inform client code of the true stack size; overriding
+it with `-D` in `build_flags` does nothing to the actual stack — it only
+misrepresents the value to any code that reads it.
 
-Fix: add to `build_flags`:
-```
--DCONFIG_BT_BTC_TASK_STACK_SIZE=10240
-```
-
-This increases the stack size for the BTC task and eliminates the hang that occurs
-when a client connects and immediately sends a long command.
+Do not add `-DCONFIG_BT_BTC_TASK_STACK_SIZE=...` to `build_flags` expecting it
+to grow the BTC stack. If you observe BTC-related hangs, the cause lies elsewhere.
 
 ### Boards without an RTC (M5StickS3 and M5Stack Grey)
 
@@ -170,6 +167,11 @@ static void processCommand(const char* raw) {
 `static` local variables live in BSS (data segment), not the stack. The function is
 only ever called from one task (main), so there is no re-entrancy concern.
 
+Both techniques together — deferring work out of `onWrite()` and using static buffers
+in `processCommand()` — also lower the peak stack depth seen by the BTC task, since
+the BTC task itself only runs the thin `onWrite()` copy and never touches the larger
+processing buffers.
+
 ### Bluedroid TX notification queue limit
 
 The Bluedroid stack's BLE TX notification queue holds at most **31 items**.
@@ -223,8 +225,9 @@ debugging cost at the bandwidth rates BLE provides.
 
 ### Newline-optional protocol
 
-Some clients (Python scripts using `\n`-framed reads) need a trailing newline.
-Others (raw BLE tools) do not want one. Rather than hardcoding either:
+Some clients (Android Bluetooth apps, which typically frame reads on `\n`) need a
+trailing newline. Others (raw BLE tools, Python/Bleak scripts) do not want one.
+Rather than hardcoding either:
 
 - Detect whether the client's **first write** ends with `\n`
 - If yes, append `\n` to all subsequent responses and notifications
@@ -442,7 +445,8 @@ Notation used here:
 C D E F G A B         — natural notes, default octave 5
 C# Db                 — sharps and flats
 '  ,                  — octave up / down (can stack: C'' = C7)
-1–9                   — override note duration (units = one beat)
+1 2 4 8 16            — note duration: whole, half, quarter, eighth, sixteenth
+                        (4 = one beat; 2 = two beats; 8 = half a beat; etc.)
 .                     — dotted note (×1.5 duration)
 -                     — rest
 ```
