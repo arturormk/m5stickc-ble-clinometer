@@ -12,6 +12,14 @@ A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices 
 
 ![Battery](docs/images/clinometer_battery.png)
 
+![Status](docs/images/clinometer_status.png)
+
+![Stack](docs/images/clinometer_stack.png)
+
+![Heap](docs/images/clinometer_heap.png)
+
+![SysInfo](docs/images/clinometer_systeminfo.png)
+
 ## What it does
 
 - Shows a live **bubble level** (clinometer) based on the built-in IMU — used to level the telescope mount
