@@ -1,1 +1,1 @@
-#define FW_VERSION "1.1.117"
+#define FW_VERSION "1.1.118"

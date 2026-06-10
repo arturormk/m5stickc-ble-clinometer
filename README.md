@@ -234,6 +234,7 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← GET_PITCHROLL
 ← SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y
 ← BEEP [<notes...>]
+← SET_SCREEN CLINOMETER|TIME|RADEC|ALTAZ|BATTERY|SYSINFO-1..4
 ← PERSIST [CLEAR|RESTORE|READ]
 ← REBOOT
 ← HELP
@@ -421,7 +422,7 @@ Returns a one-line summary of device state.
 
 | Field | Values | Description |
 |---|---|---|
-| `SCREEN` | `CLINOMETER` `TIME` `RADEC` `ALTAZ` `BATTERY` `MESSAGE` | Active screen |
+| `SCREEN` | `CLINOMETER` `TIME` `RADEC` `ALTAZ` `BATTERY` `MESSAGE` `SYSINFO-1` `SYSINFO-2` `SYSINFO-3` `SYSINFO-4` | Active screen |
 | `BLE` | `0` `1` | BLE connected flag |
 | `STREAM` | `0` `1` | Tilt streaming enabled |
 | `BAT` | float volts | Battery voltage (AXP2101) |
@@ -816,6 +817,38 @@ Use `PERSIST` to save the assignment across reboots.
 
 ---
 
+### `SET_SCREEN <name>`
+
+Navigates immediately to the named screen. Useful for test automation and integration scripts that need to verify the `GET_STATUS` `SCREEN=` field without physical button presses.
+
+```
+→ SET_SCREEN CLINOMETER
+← OK SCREEN CLINOMETER
+
+→ SET_SCREEN SYSINFO-2
+← OK SCREEN SYSINFO-2
+
+← ERR BAD_ARGS   (unrecognised name)
+```
+
+Valid names match the values returned by `GET_STATUS`:
+
+| Name | Screen |
+|---|---|
+| `CLINOMETER` | Bubble-level screen |
+| `TIME` | Date/time screen |
+| `RADEC` | RA/Dec screen |
+| `ALTAZ` | Alt/Az screen |
+| `BATTERY` | Battery screen |
+| `SYSINFO-1` | System Info page 1/4 — STATUS |
+| `SYSINFO-2` | System Info page 2/4 — STACK |
+| `SYSINFO-3` | System Info page 3/4 — HEAP |
+| `SYSINFO-4` | System Info page 4/4 — SYSTEM INFO |
+
+`MESSAGE` is not accepted — use `SHOW_MSG` / `SHOW_MSG_WAIT` to enter the message overlay.
+
+---
+
 ### `BEEP [note ...]`
 
 Plays a beep or a melody through the built-in speaker. The response is returned immediately while the melody plays asynchronously.
@@ -952,6 +985,10 @@ EVENT SCREEN TIME
 EVENT SCREEN RADEC
 EVENT SCREEN ALTAZ
 EVENT SCREEN BATTERY
+EVENT SCREEN SYSINFO-1
+EVENT SCREEN SYSINFO-2
+EVENT SCREEN SYSINFO-3
+EVENT SCREEN SYSINFO-4
 EVENT SCREEN MESSAGE
 ```
 
@@ -1049,6 +1086,7 @@ options:
 | `listen` | `[--stream <ms>]` | Print all BLE notifications; `--stream <ms>` also starts tilt streaming on the same connection |
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
+| `set-screen` | `<name>` | Navigate to a named screen: `CLINOMETER` `TIME` `RADEC` `ALTAZ` `BATTERY` `SYSINFO-1` through `SYSINFO-4` |
 | `get-pitchroll` | | Show current pitch and roll axis assignment |
 | `set-pitchroll` | `<pitch>,<roll>` | Set pitch and roll signed UX axes (e.g. `+X,+Y`); use `~` instead of `-` for a negative leading axis to avoid shell flag conflicts |
 | `beep` | `[note ...]` | Play a beep or melody (omit notes for a standard beep) |
@@ -1088,6 +1126,8 @@ uv run tools/m5ctl set-timezone LST
 uv run tools/m5ctl set-longitude 135.5
 uv run tools/m5ctl set-radec "12:34:56" "+07:08:09"
 uv run tools/m5ctl night-mode on
+uv run tools/m5ctl set-screen BATTERY               # navigate to battery screen
+uv run tools/m5ctl set-screen SYSINFO-2             # navigate to STACK sub-page (2/4)
 uv run tools/m5ctl get-pitchroll
 uv run tools/m5ctl set-pitchroll +X,+Y             # default: pitch=+X roll=+Y
 uv run tools/m5ctl set-pitchroll ~X,+Y             # negative pitch axis (use ~ to avoid flag conflict)

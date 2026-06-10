@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Firmware / BLE** — `GET_STATUS` no longer returns `SCREEN=UNKNOWN` when the
+  device is on a System Info page (1/4–4/4). `screenName()` now maps
+  `SCREEN_SYSINFO_1`–`SCREEN_SYSINFO_4` to `SYSINFO-1`–`SYSINFO-4`.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
 - **3D viewer** — IMU axis arrows (toggled with `C`) are now drawn in the
   physically correct model-space directions for each device. Previously
   `draw_axes()` always used the fixed GL frame `(1,0,0)`, `(0,1,0)`,
@@ -79,6 +84,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp (e.g. `+02:00`). Explicit `--label` still takes priority.
 
 ### Added
+- **`SET_SCREEN` BLE command** — navigates to any named screen directly over BLE:
+  `CLINOMETER`, `TIME`, `RADEC`, `ALTAZ`, `BATTERY`, `SYSINFO-1` through
+  `SYSINFO-4`. Returns `OK SCREEN <name>`. `MESSAGE` is excluded (use `SHOW_MSG`
+  instead). Primarily useful for test automation and integration scripts.
+- **m5ctl** — `set-screen NAME` subcommand wraps `SET_SCREEN`; the valid name list
+  is enforced by argparse before any BLE connection is made.
+- **tests** — `test_set_screen_reports_correct_name` (parametrized over all nine
+  navigable screens including every SYSINFO page) and
+  `test_get_status_screen_field_is_known` guard against future regressions.
+
 - **3D viewer** — M5StickS3 model added to `tests/3d_model.py`. Body
   dimensions and UX/GL axis layout are identical to the M5StickC Plus 2 (same
   landscape camera eye, same screen inset, same `ux_x_gl` / `ux_neg_y_gl`);

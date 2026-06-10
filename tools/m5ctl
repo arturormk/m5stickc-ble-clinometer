@@ -478,6 +478,8 @@ examples:
   m5ctl set-pitchroll +X,-Y            # flip roll sign
   m5ctl beep               # standard attention beep (880 Hz, 200 ms)
   m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
+  m5ctl set-screen BATTERY       # navigate to battery screen
+  m5ctl set-screen SYSINFO-2     # navigate to STACK sub-page
   m5ctl persist            # save current tz, longitude, calibration and pitchroll to NVS
   m5ctl persist-read       # show stored NVS values (valid flag + all keys)
   m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
@@ -633,6 +635,13 @@ p.add_argument(
         "Each axis is one of: +X -X +Y -Y (use ~ for - to avoid argparse flag conflicts)."
     ),
 )
+
+_SCREEN_NAMES = ["CLINOMETER", "TIME", "RADEC", "ALTAZ", "BATTERY",
+                 "SYSINFO-1", "SYSINFO-2", "SYSINFO-3", "SYSINFO-4"]
+p = sub.add_parser("set-screen",
+                   help="Navigate to a named screen (set-screen <name>)")
+p.add_argument("name", choices=_SCREEN_NAMES, metavar="NAME",
+               help="Screen name: " + "|".join(_SCREEN_NAMES))
 
 sub.add_parser("persist",         help="Save current tz, timezone offset, longitude, calibration and pitchroll to NVS")
 sub.add_parser("persist-read",    help="Read stored NVS values (validity flag and all keys)")
@@ -793,6 +802,8 @@ def dispatch(args) -> None:
                 )
                 sys.exit(1)
             do_send(args, f"SET_PITCHROLL {parts[0]},{parts[1]}")
+        case "set-screen":
+            do_send(args, f"SET_SCREEN {args.name}")
         case "beep":
             cmd = "BEEP " + " ".join(args.notes) if args.notes else "BEEP"
             do_send(args, cmd)

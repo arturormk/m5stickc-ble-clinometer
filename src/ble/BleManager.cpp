@@ -28,6 +28,10 @@ static const char* screenName(int idx) {
         case SCREEN_ALTAZ:      return "ALTAZ";
         case SCREEN_BATTERY:    return "BATTERY";
         case SCREEN_MESSAGE:    return "MESSAGE";
+        case SCREEN_SYSINFO_1:  return "SYSINFO-1";
+        case SCREEN_SYSINFO_2:  return "SYSINFO-2";
+        case SCREEN_SYSINFO_3:  return "SYSINFO-3";
+        case SCREEN_SYSINFO_4:  return "SYSINFO-4";
         default:                return "UNKNOWN";
     }
 }
@@ -279,6 +283,7 @@ static const char* const kHelpLines[] = {
     "GET_PITCHROLL",
     "SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y",
     "BEEP [<notes...>]",
+    "SET_SCREEN CLINOMETER|TIME|RADEC|ALTAZ|BATTERY|SYSINFO-1..4",
     "PERSIST [CLEAR|RESTORE|READ]",
     "REBOOT",
     "HELP",  // must remain last — clients use it as a stream terminator
@@ -738,6 +743,23 @@ static void processCommand(const char* raw) {
                      s_state->timezoneOffsetSec, lonBuf, rgx, rgy, rgz,
                      axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
         }
+
+    } else if (strcasecmp(tok, "SET_SCREEN") == 0) {
+        char* name = strtok_r(nullptr, " ", &saveptr);
+        if (!name) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        int idx = -1;
+        if      (strcasecmp(name, "CLINOMETER") == 0) idx = SCREEN_CLINOMETER;
+        else if (strcasecmp(name, "TIME")       == 0) idx = SCREEN_TIME;
+        else if (strcasecmp(name, "RADEC")      == 0) idx = SCREEN_RADEC;
+        else if (strcasecmp(name, "ALTAZ")      == 0) idx = SCREEN_ALTAZ;
+        else if (strcasecmp(name, "BATTERY")    == 0) idx = SCREEN_BATTERY;
+        else if (strcasecmp(name, "SYSINFO-1")  == 0) idx = SCREEN_SYSINFO_1;
+        else if (strcasecmp(name, "SYSINFO-2")  == 0) idx = SCREEN_SYSINFO_2;
+        else if (strcasecmp(name, "SYSINFO-3")  == 0) idx = SCREEN_SYSINFO_3;
+        else if (strcasecmp(name, "SYSINFO-4")  == 0) idx = SCREEN_SYSINFO_4;
+        if (idx < 0) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        s_state->screenIndex = idx;
+        snprintf(resp, sizeof(resp), "OK SCREEN %s", screenName(idx));
 
     } else if (strcasecmp(tok, "REBOOT") == 0) {
         strncpy(resp, "OK REBOOTING", sizeof(resp) - 1);

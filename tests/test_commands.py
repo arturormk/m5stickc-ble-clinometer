@@ -1259,6 +1259,54 @@ async def test_set_pitchroll_affects_tilt(device_addr):
 
 
 # ---------------------------------------------------------------------------
+# SET_SCREEN
+# ---------------------------------------------------------------------------
+
+_KNOWN_SCREEN_NAMES = {
+    "CLINOMETER", "TIME", "RADEC", "ALTAZ", "BATTERY",
+    "SYSINFO-1", "SYSINFO-2", "SYSINFO-3", "SYSINFO-4",
+    "MESSAGE",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", [
+    "CLINOMETER", "TIME", "RADEC", "ALTAZ", "BATTERY",
+    "SYSINFO-1", "SYSINFO-2", "SYSINFO-3", "SYSINFO-4",
+])
+async def test_set_screen_reports_correct_name(device_addr, name):
+    """SET_SCREEN <name> round-trips: GET_STATUS SCREEN= matches the requested name.
+
+    Regression for SYSINFO pages returning SCREEN=UNKNOWN (reported by @senshu-hiro2).
+    """
+    async with BleSession(device_addr) as s:
+        resp = await s.send(f"SET_SCREEN {name}")
+        assert resp == f"OK SCREEN {name}", f"SET_SCREEN response: {resp!r}"
+        status = await s.send("GET_STATUS")
+        screen = _parse_screen(status)
+        assert screen == name, f"Expected SCREEN={name}, got {screen!r} in {status!r}"
+    async with BleSession(device_addr) as s:
+        await s.send("SET_SCREEN CLINOMETER")
+
+
+@pytest.mark.asyncio
+async def test_set_screen_bad_arg(device_addr):
+    """SET_SCREEN with an unrecognised name is rejected."""
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_SCREEN BOGUS")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_get_status_screen_field_is_known(device_addr):
+    """GET_STATUS SCREEN= value is always a recognised name, never UNKNOWN."""
+    async with BleSession(device_addr) as s:
+        status = await s.send("GET_STATUS")
+    screen = _parse_screen(status)
+    assert screen in _KNOWN_SCREEN_NAMES, f"Unrecognised SCREEN={screen!r} in {status!r}"
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 
