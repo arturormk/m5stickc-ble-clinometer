@@ -1105,6 +1105,8 @@ options:
 | `reboot` | | Software-reset the device |
 | `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
 | `script` | `FILE` | Run m5ctl commands from a file or stdin (`-`), one per line; each line is parsed as m5ctl arguments (`set-time-now --timezone CEST`, `beep C4`, …); blank lines and `#` comments are ignored |
+| `run` | `FILE` | Like `script` but executes commands sequentially and supports `! directive` lines for timing, looping, interaction, and reply validation (see below) |
+| `terminal` | | Open an interactive BLE terminal over a persistent connection; accepts m5ctl commands or raw BLE strings; all notifications print live; `exit` or Ctrl+D to quit (alias: `term`) |
 
 Examples:
 
@@ -1154,6 +1156,10 @@ uv run tools/m5ctl exec commands.txt     # send commands from a file
 printf 'PING\nGET_TILT\n' | uv run tools/m5ctl exec -   # send from stdin
 uv run tools/m5ctl script setup.m5s     # run m5ctl commands from a script file
 echo 'set-time-now --timezone CEST' | uv run tools/m5ctl script -   # from stdin
+uv run tools/m5ctl run sequence.m5s              # timed script with ! directives
+uv run tools/m5ctl -p run tools/demo.m5s         # full demo (BLE commands echoed to stderr)
+uv run tools/m5ctl terminal                       # interactive BLE terminal
+uv run tools/m5ctl term                           # alias for terminal
 ```
 
 ### Device address configuration
@@ -1383,6 +1389,180 @@ persist
 "@ | uv run tools/m5ctl script -
 ```
 
+### `run` — timed scripts with control directives
+
+`run` extends `script` with sequential execution and `! directive` lines for timing, looping, interaction, and reply validation. Unlike `script` (which batches commands and sends them all at once), `run` keeps a single BLE connection open and sends each command immediately, inserting sleeps, loops, and event waits as it goes.
+
+```bash
+uv run tools/m5ctl run sequence.m5s          # execute a timed script
+uv run tools/m5ctl -p run tools/demo.m5s     # run the full demo (echoes BLE commands to stderr)
+uv run tools/m5ctl run -                     # read from stdin until EOF
+```
+
+#### Directives
+
+Lines whose first non-whitespace character sequence is `!` are interpreted as directives rather than m5ctl commands:
+
+| Directive | Effect |
+|---|---|
+| `! wait <seconds>` | Pause execution for the given number of seconds (floats accepted: `! wait 1.5`) |
+| `! at HH:MM:SS` | Sleep until the next occurrence of that local wall-clock time; if the time has already passed today, waits until tomorrow |
+| `! for <N>` | Repeat the following block N times (0 is valid — the block is skipped) |
+| `! endfor` | Close the innermost `! for` block |
+| `! echo <text>` | Print text to stdout — useful for narration cues or progress markers |
+| `! expect <prefix>` | Wait for an incoming BLE notification whose text starts with `prefix`; every notification read while waiting is printed. Use it to validate a command's reply (`! expect OK PONG`) or to wait for an async event (`! expect EVENT SCREEN CLINOMETER`). Fails with a timeout error if no matching notification arrives within `--timeout` seconds. When placed immediately after a BLE command, the command's reply is not consumed automatically — `! expect` handles it. |
+| `! wait_tilt [<degrees>]` | Block until the device tilts more than `<degrees>` from its baseline orientation at the start of the wait (default 15°). |
+| `! exit` | Stop script execution immediately; remaining lines are not processed. |
+
+`! for` / `! endfor` blocks can be nested to any depth. Blank lines and `#` comments are stripped as usual.
+
+#### Example — demo/video sequence
+
+```
+# capture-intro.m5s — run once before filming the intro sequence
+! echo === Starting demo ===
+set-screen CLINOMETER
+! wait 2.0
+show-msg 3 Tilt demo starting
+! wait 3.0
+! for 3
+  beep C4 E4 G4
+  ! wait 1.5
+! endfor
+night-mode on
+! wait 2.0
+night-mode off
+! echo === Done ===
+```
+
+```bash
+uv run tools/m5ctl run capture-intro.m5s
+```
+
+#### Example — reply validation with `! expect`
+
+```
+# Confirm connectivity and device state before an automated sequence
+ping
+! expect OK PONG
+
+get-board
+! expect OK BOARD
+
+status
+! expect OK STATUS
+
+set-screen CLINOMETER
+! expect OK SCREEN
+
+# show-msg sends OK MSG immediately, then two screen-change events when the
+# message appears and when it returns to the previous screen
+show-msg 2 Sequence starting
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+```
+
+#### Example — button and tilt interaction
+
+Button waits are expressed with `show-msg-wait` + `! expect`. `cancel-msg` dismisses the message; because `cancel-msg` is immediately followed by `! expect EVENT SCREEN`, the command's `OK MSG_CANCEL` reply is also handled by the `! expect` loop, leaving the queue clean for the next command.
+
+```
+! echo Press M5 on the device to begin
+show-msg-wait inf M5 Press M5 to continue
+! expect EVENT SCREEN MESSAGE
+! expect EVENT BUTTON M5
+cancel-msg
+! expect EVENT SCREEN
+beep G8 E4
+
+! echo Now tilt the device more than 20 degrees
+show-msg inf Tilt me!
+! expect EVENT SCREEN MESSAGE
+! wait_tilt 20
+cancel-msg
+! expect EVENT SCREEN
+! echo Tilt detected
+beep E8 G4
+```
+
+#### Example — observatory setup at a precise time
+
+```
+# Wait until 21:30:00 local time, then configure and announce
+! echo Waiting for observation window...
+! at 21:30:00
+set-time-now
+set-radec '06:45:09' '-16:42:58'
+set-longitude -3.6875
+beep C4 E4 G4 C'2
+! echo Ready — Sirius configured
+```
+
+#### Full device demo (`tools/demo.m5s`)
+
+`tools/demo.m5s` is a complete demo script that exercises all `run` directives and major firmware features in sequence: connectivity check, screen tour, live tilt readings, night mode, melody, button interaction, and tilt detection.
+
+```bash
+uv run tools/m5ctl -p run tools/demo.m5s
+```
+
+The `-p` flag echoes each BLE command to stderr as it is sent, which is useful for narration or debugging while the script runs.
+
+#### Choosing between `script` and `run`
+
+| | `script` | `run` |
+|---|---|---|
+| Execution model | Batch: all commands sent in one round-trip | Sequential: one command at a time |
+| Timing | None | `! wait`, `! at` |
+| Looping | None | `! for` / `! endfor` |
+| Console output | None | `! echo` |
+| Reply validation | None | `! expect` |
+| Tilt wait | None | `! wait_tilt` |
+| Early exit | None | `! exit` |
+| Best for | Setup scripts (fast, minimal connect time) | Demos, video narration, timed automation |
+
+### `terminal` — interactive BLE terminal
+
+`terminal` (alias `term`) opens an interactive session over a single persistent BLE connection. It is useful for exploring the BLE interface, sending ad-hoc commands, and watching live notifications without connecting and disconnecting for every command.
+
+```bash
+uv run tools/m5ctl terminal
+uv run tools/m5ctl term       # same thing
+```
+
+```
+Connected to F0:24:F9:9B:E2:52 — type commands, Ctrl+D or exit to quit.
+m5> ping
+>>> PING
+OK PONG
+m5> tilt
+>>> GET_TILT
+TILT +0.42 -1.17 1.00
+m5> set-screen TIME
+>>> SET_SCREEN TIME
+OK SCREEN TIME
+EVENT SCREEN TIME
+m5> night-mode on
+>>> SET_NIGHT_MODE ON
+OK NIGHT_MODE ON
+m5> exit
+```
+
+**Accepted input:**
+
+- Any `m5ctl` sub-command (`tilt`, `set-screen CLINOMETER`, `beep C4 E4 G4`, `set-time-now --timezone CEST`, …) — resolved to its BLE string before sending.
+- Raw BLE strings (`GET_TILT`, `SET_NIGHT_MODE ON`, …) — sent verbatim if not recognised as an m5ctl command.
+- `?` — sends `HELP` (same as the BLE `?` alias).
+- `version` — prints the m5ctl version without sending a BLE command.
+- `exit` or `quit` — closes the connection and exits.
+- Ctrl+D — same as `exit`.
+
+**Notifications** arrive asynchronously and are printed immediately, even while the prompt is displayed. When a notification arrives mid-input on a terminal that supports ANSI, the current input line is preserved on a fresh line below the notification.
+
+**History** is persisted to `~/.m5ctl_history` (up to 500 lines) on platforms where the Python `readline` module is available (Linux, macOS). On Windows, history is in-session only.
+
+Subcommands that require their own BLE connection or that are not meaningful inside a running session (`listen`, `exec`, `script`, `run`, `scan`, `terminal`) are rejected with a helpful message rather than silently failing.
+
 ### tests/3d_model.py — real-time 3D orientation viewer
 
 `tests/3d_model.py` connects to the device over BLE and renders a live 3D model that tracks the device's pitch and roll in real time. It requires the `tools` dependency group (pygame + PyOpenGL):
@@ -1495,7 +1675,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
 │       └── Nvm.h/.cpp           NVM persistence (Preferences, namespace "clino")
 ├── tools/
-│   └── m5ctl              Python 3 BLE command-line client
+│   ├── m5ctl              Python 3 BLE command-line client
+│   └── demo.m5s           Full-device demo script for `m5ctl run`
 ├── tests/
 │   ├── conftest.py        BleSession helper and pytest fixtures
 │   ├── test_commands.py   BLE command interface tests (incl. GET/SET_PITCHROLL)

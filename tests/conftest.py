@@ -235,7 +235,7 @@ class BleSession:
                 await self._do_connect()
                 await self._client.start_notify(RESP_UUID, self._on_notify)
                 return self
-            except BleakError as exc:
+            except (BleakError, TimeoutError) as exc:
                 last_exc = exc
                 if attempt < self._retries - 1:
                     await asyncio.sleep(1.0 * (attempt + 1))

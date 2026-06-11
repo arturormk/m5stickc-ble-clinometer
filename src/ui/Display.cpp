@@ -12,6 +12,7 @@ void Display::begin() {
     M5.Display.setRotation(isStick ? 3 : 1);
     M5.Display.setBrightness(BRIGHTNESS_FULL);
     _lastTiltActivityMs = millis();
+    _lastTiltChangeMs   = millis();
     _W = M5.Display.width();
     _H = M5.Display.height();
     _sprite = new LGFX_Sprite(&M5.Display);
@@ -62,7 +63,12 @@ void Display::update(const DeviceState& state) {
     if (state.screenIndex == SCREEN_CLINOMETER && _hasLastClinoState) {
         bool pitchSame = fabsf(state.pitchDeg - _lastClinoState.pitchDeg) < 0.1f;
         bool rollSame  = fabsf(state.rollDeg  - _lastClinoState.rollDeg)  < 0.1f;
-        if (pitchSame && rollSame
+        if (!pitchSame || !rollSame)
+            _lastTiltChangeMs = now;
+        bool graceExpired = (now - _lastTiltChangeMs)     >= SKIP_GRACE_MS
+                         && (now - state.lastCalibrateMs) >= SKIP_GRACE_MS;
+        if (graceExpired
+                && pitchSame && rollSame
                 && state.batteryLevel == _lastClinoState.batteryLevel
                 && state.bleConnected == _lastClinoState.bleConnected
                 && state.nightMode    == _lastClinoState.nightMode

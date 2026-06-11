@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **m5ctl** — `run FILE` subcommand: executes m5ctl commands from a file (or stdin when `FILE` is `-`) sequentially over a single BLE connection, with support for `! directive` lines that control timing, looping, interaction, and output validation. Available directives: `! wait <seconds>`, `! at HH:MM:SS`, `! for N` / `! endfor`, `! echo <text>`, `! expect <prefix>`, `! wait_tilt [<degrees>]`, `! exit`. Unlike `script`, which batches all commands and sends them at once, `run` executes each item in order, inserting sleeps, loops, and event waits as it goes — making it suitable for demos, video narration, and timed automation.
+- **m5ctl** — `terminal` subcommand (alias `term`): opens an interactive BLE terminal over a persistent connection. Type m5ctl sub-commands (`tilt`, `set-screen CLINOMETER`, …) or raw BLE strings (`GET_TILT`, …); all BLE notifications print to stdout as they arrive, interleaved with the `m5>` prompt. Input history is persisted to `~/.m5ctl_history` on platforms where the `readline` module is available. Type `exit` or press Ctrl+D to close the connection.
+- **`tools/demo.m5s`** — full-device demo script showcasing all `run` directives and major firmware features: connectivity check, screen navigation, live tilt readings, night mode, melody playback, button interaction, and tilt detection. Run with `uv run tools/m5ctl -p run tools/demo.m5s`.
+
 ### Fixed
+- **m5ctl `run`** — `! expect <prefix>` no longer times out when placed immediately after a plain BLE command. Previously the command handler always consumed the first device reply with `queue.get()`, leaving nothing for `! expect` to match — so `ping` / `! expect OK PONG` always timed out. The fix adds a look-ahead in `cmd_run`: when the next item in the expanded items list is an `_Expect`, the command handler skips its auto-consume and lets `! expect` drain the queue instead. The `! expect` loop already prints every notification it reads until the prefix matches, so multi-event flows (e.g. `show-msg … / ! expect EVENT SCREEN MESSAGE`) continue to work correctly.
 - **Build / M5StickC Plus 2** — `[env:m5stickc-plus2]` was missing
   `BOARD_HAS_PSRAM` and `-mfix-esp32-psram-cache-issue`. The Plus 2 ships
   with 2 MB PSRAM; without `BOARD_HAS_PSRAM` the Arduino/ESP-IDF layer does
@@ -24,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs / 3D viewer** — the keyboard shortcut table in the README was missing
   the `4` → M5StickS3 entry. Key `4` has been functional since v1.2.0 but was
   not documented.
+- **Firmware / Display** — the clinometer screen now keeps updating for 30 seconds after
+  a `CALIBRATE` or `CALIBRATE_RESET` command (and after any tilt change exceeding 0.1°)
+  before the power-saving "skip unchanged frame" guard activates. Previously the guard
+  fired immediately on the first stable frame, so the bubble appeared frozen right
+  after calibration even though the reference angle had shifted.
 
 ## [1.2.0] — 2026-06-10
 

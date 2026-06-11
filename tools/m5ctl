@@ -3,20 +3,21 @@
 
 import asyncio
 import argparse
+import io
 import os
 import re
 import pathlib
-import shlex
 import sys
 from datetime import datetime, timezone, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from bleak import BleakClient, BleakScanner, BleakError
 from bleak.exc import BleakDeviceNotFoundError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
-_VERSION   = "1.2"
+_VERSION   = "1.3"
 
 
 def _get_conf_path() -> pathlib.Path:
@@ -279,6 +280,98 @@ async def cmd_exec(address: str, lines: list[str], timeout: float, print_cmd: bo
                 sys.exit(1)
 
 
+async def cmd_run(
+    address: str,
+    items: list,
+    timeout: float,
+    print_cmd: bool,
+) -> None:
+    """Execute a flat list of BLE commands and directives over a single connection."""
+    queue: "asyncio.Queue[str]" = asyncio.Queue()
+
+    def on_notify(_, data: bytearray) -> None:
+        queue.put_nowait(data.decode("utf-8", errors="replace").strip())
+
+    async with _connect(address, CONNECT_TIMEOUT) as client:
+        await _start_notify(client, RESP_UUID, on_notify)
+        for idx, item in enumerate(items):
+            if isinstance(item, _Wait):
+                await asyncio.sleep(item.seconds)
+            elif isinstance(item, _AtTime):
+                now = datetime.now()
+                target = now.replace(
+                    hour=item.hour, minute=item.minute, second=item.second, microsecond=0
+                )
+                if target <= now:
+                    target += timedelta(days=1)
+                delta = (target - now).total_seconds()
+                if delta > 0:
+                    await asyncio.sleep(delta)
+            elif isinstance(item, _Echo):
+                print(item.text)
+            elif isinstance(item, _WaitTilt):
+                if print_cmd:
+                    print(">>> GET_TILT (baseline)", file=sys.stderr)
+                await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
+                try:
+                    resp = await asyncio.wait_for(queue.get(), timeout=timeout)
+                    print(resp)
+                except asyncio.TimeoutError:
+                    print(f"error: no tilt baseline response within {timeout}s", file=sys.stderr)
+                    sys.exit(1)
+                try:
+                    parts = resp.split()
+                    pitch0, roll0 = float(parts[1]), float(parts[2])
+                except (IndexError, ValueError):
+                    print(f"error: unexpected tilt response: {resp!r}", file=sys.stderr)
+                    sys.exit(1)
+                while True:
+                    await asyncio.sleep(0.2)
+                    await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
+                    try:
+                        resp = await asyncio.wait_for(queue.get(), timeout=timeout)
+                    except asyncio.TimeoutError:
+                        print(f"error: no tilt response within {timeout}s", file=sys.stderr)
+                        sys.exit(1)
+                    try:
+                        parts = resp.split()
+                        if parts[0] != "TILT":
+                            continue
+                        pitch, roll = float(parts[1]), float(parts[2])
+                    except (IndexError, ValueError):
+                        continue
+                    if max(abs(pitch - pitch0), abs(roll - roll0)) >= item.degrees:
+                        print(resp)
+                        break
+            elif isinstance(item, _Expect):
+                while True:
+                    try:
+                        evt = await asyncio.wait_for(queue.get(), timeout=timeout)
+                    except asyncio.TimeoutError:
+                        print(
+                            f"error: line {item.lineno}: '! expect {item.prefix}' timed out after {timeout}s",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+                    print(evt)
+                    if evt.startswith(item.prefix):
+                        break
+            elif isinstance(item, _Exit):
+                break
+            else:
+                if print_cmd:
+                    print(f">>> {item}", file=sys.stderr)
+                await client.write_gatt_char(CMD_UUID, item.encode("utf-8"), response=False)
+                next_item = items[idx + 1] if idx + 1 < len(items) else None
+                if not isinstance(next_item, _Expect):
+                    try:
+                        resp = await asyncio.wait_for(queue.get(), timeout=timeout)
+                        print(resp)
+                    except asyncio.TimeoutError:
+                        print(f"error: no response for '{item}' within {timeout}s", file=sys.stderr)
+                        sys.exit(1)
+
+
 async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
     """Subscribe to the response characteristic and print every notification."""
 
@@ -296,6 +389,76 @@ async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
             await asyncio.Future()  # run until cancelled
         except asyncio.CancelledError:
             pass
+
+
+async def cmd_terminal(address: str, timeout: float) -> None:
+    """Interactive BLE terminal: persistent connection, send commands, see all notifications."""
+    _readline = None
+    try:
+        import readline as _readline
+        history = pathlib.Path.home() / ".m5ctl_history"
+        with suppress(OSError):
+            _readline.read_history_file(history)
+        _readline.set_history_length(500)
+    except ImportError:
+        pass
+
+    queue: "asyncio.Queue[str]" = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    prompt_showing = False
+    use_ansi = sys.stdout.isatty()
+
+    def on_notify(_, data: bytearray) -> None:
+        queue.put_nowait(data.decode("utf-8", errors="replace").strip())
+
+    async with _connect(address, CONNECT_TIMEOUT) as client:
+        await _start_notify(client, RESP_UUID, on_notify)
+        print(f"Connected to {address} — type commands, Ctrl+D or exit to quit.", file=sys.stderr)
+
+        async def notify_printer() -> None:
+            while True:
+                msg = await queue.get()
+                if prompt_showing and use_ansi:
+                    sys.stdout.write(f"\r\033[K{msg}\nm5> ")
+                    sys.stdout.flush()
+                else:
+                    print(msg, flush=True)
+
+        printer = asyncio.create_task(notify_printer())
+        try:
+            while True:
+                if use_ansi:
+                    sys.stdout.write("m5> ")
+                    sys.stdout.flush()
+                prompt_showing = True
+                try:
+                    line = await loop.run_in_executor(None, input, "" if use_ansi else "m5> ")
+                except EOFError:
+                    prompt_showing = False
+                    print(file=sys.stderr)
+                    break
+                prompt_showing = False
+                line = line.strip()
+                if not line:
+                    continue
+                if line in ("exit", "quit"):
+                    break
+                if line == "version":
+                    print(f"m5ctl {_VERSION}")
+                    continue
+                ble_cmd = _terminal_line_to_ble(line, address, timeout)
+                if ble_cmd is None:
+                    continue
+                print(f">>> {ble_cmd}", file=sys.stderr)
+                await client.write_gatt_char(CMD_UUID, ble_cmd.encode("utf-8"), response=False)
+        finally:
+            printer.cancel()
+            with suppress(asyncio.CancelledError):
+                await printer
+
+    if _readline is not None:
+        with suppress(OSError):
+            _readline.write_history_file(pathlib.Path.home() / ".m5ctl_history")
 
 
 async def cmd_scan(timeout: float) -> None:
@@ -327,6 +490,37 @@ def run(coro) -> None:
 
 
 _script_commands: list[str] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Run-script directive types
+# ---------------------------------------------------------------------------
+
+class _Wait(NamedTuple):
+    seconds: float
+
+
+class _AtTime(NamedTuple):
+    hour: int
+    minute: int
+    second: int
+
+
+class _Echo(NamedTuple):
+    text: str
+
+
+class _WaitTilt(NamedTuple):
+    degrees: float  # delta threshold in degrees (>= triggers)
+
+
+class _Exit(NamedTuple):
+    pass
+
+
+class _Expect(NamedTuple):
+    prefix: str   # wait for a notification that starts with this text
+    lineno: int   # source line number, for error reporting
 
 
 def do_send(args, command: str) -> None:
@@ -486,6 +680,7 @@ examples:
   m5ctl persist-restore    # re-enable and apply last stored values in-session
   m5ctl reboot             # software-reset the device
   m5ctl listen             # print all notifications (events, screen changes…)
+  m5ctl terminal           # interactive BLE terminal (persistent session, live notifications)
   m5ctl help               # list all accepted BLE commands
   m5ctl script setup.m5s   # run m5ctl commands from a file over one BLE connection
   m5ctl script -           # read m5ctl commands from stdin
@@ -551,6 +746,11 @@ p.add_argument("file", metavar="FILE",
 p = sub.add_parser("script",  help="Run m5ctl commands from a file over one BLE connection")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands, one per line (use - for stdin)")
+p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo)")
+p.add_argument("file", metavar="FILE",
+               help="script file with m5ctl commands and ! directives, one per line (use - for stdin)")
+sub.add_parser("terminal", aliases=["term"],
+               help="Open an interactive BLE terminal (persistent connection, live notifications)")
 
 # --- parameterised commands ---
 p = sub.add_parser("set-time",
@@ -600,14 +800,14 @@ p.add_argument("az",  help="e.g. 181.7")
 p = sub.add_parser("show-msg",
                    help="Display a message (show-msg <seconds|inf> <text>)")
 p.add_argument("duration", help="Display duration in seconds, or 'inf'")
-p.add_argument("text",     help="Message text")
+p.add_argument("text", nargs='+', help="Message text (no quoting needed in scripts)")
 
 p = sub.add_parser("show-msg-wait",
                    help="Display a message and watch for a button press "
                         "(show-msg-wait <seconds|inf> <buttons> <text>)")
 p.add_argument("duration", help="Display duration in seconds, or 'inf'")
 p.add_argument("buttons",  help="Button mask: M5  A  B  M5,A  ANY")
-p.add_argument("text",     help="Message text")
+p.add_argument("text", nargs='+', help="Message text (no quoting needed in scripts)")
 
 
 p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
@@ -663,14 +863,53 @@ p.add_argument("notes", nargs="*",
 # Script command
 # ---------------------------------------------------------------------------
 
-_NON_SCRIPT_CMDS = frozenset({"list", "version", "help", "scan", "listen", "exec", "script", None})
+_NON_SCRIPT_CMDS = frozenset({
+    "list", "version", "help", "scan", "listen",
+    "exec", "script", "run", "terminal", "term", None,
+})
+
+
+def _terminal_line_to_ble(line: str, address: str, timeout: float) -> str | None:
+    """Convert a terminal input line to a BLE command string, or None for local-only commands.
+
+    Tries to parse as an m5ctl sub-command first; falls back to sending the raw string.
+    Argparse stderr is suppressed so that raw BLE strings (e.g. GET_TILT) don't produce
+    spurious error output before the raw fallback path is taken.
+    """
+    if line == "?":
+        return "HELP"
+
+    buf = io.StringIO()
+    old_err, sys.stderr = sys.stderr, buf
+    try:
+        ns = parser.parse_args(_preprocess_argv(line.split()))
+    except SystemExit:
+        return line  # parse failed → treat as raw BLE command
+    finally:
+        sys.stderr = old_err
+
+    if ns.cmd == "help":
+        return "HELP"
+    if ns.cmd == "listen":
+        print("(already connected and listening — notifications appear above)", file=sys.stderr)
+        return None
+    if ns.cmd in _NON_SCRIPT_CMDS:
+        print(f"('{ns.cmd}' not available in terminal; run from the command line)", file=sys.stderr)
+        return None
+    if ns.cmd is None:
+        return line
+
+    ns.device = address
+    ns.timeout = timeout
+    ns.print_cmd = False
+    return _dispatch_to_ble_string(ns) or line
 
 
 def cmd_script(script_args, lines: list[tuple[int, str]]) -> None:
     global _script_commands
     _script_commands = []
     for lineno, line in lines:
-        line_argv = _preprocess_argv(shlex.split(line))
+        line_argv = _preprocess_argv(line.split())
         try:
             line_args = parser.parse_args(line_argv)
         except SystemExit:
@@ -689,6 +928,151 @@ def cmd_script(script_args, lines: list[tuple[int, str]]) -> None:
     commands = list(_script_commands)
     _script_commands = None
     run(cmd_exec(script_args.device, commands, script_args.timeout, script_args.print_cmd))
+
+
+def _dispatch_to_ble_string(line_args) -> str | None:
+    """Return the BLE command string that dispatch() would send, without sending it."""
+    global _script_commands
+    old = _script_commands
+    _script_commands = []
+    dispatch(line_args)
+    cmds = list(_script_commands)
+    _script_commands = old
+    return cmds[0] if cmds else None
+
+
+def _expand_run_script(
+    source: list[tuple[int, str]],
+    script_args,
+    *,
+    _start: int = 0,
+    _end: int | None = None,
+) -> list:
+    """Expand a source line list into a flat list of BLE strings and directive objects.
+
+    Handles ! directives (wait, at, echo, for/endfor) and resolves loops eagerly.
+    """
+    result = []
+    i = _start
+    end = len(source) if _end is None else _end
+
+    while i < end:
+        lineno, line = source[i]
+
+        if line.startswith("!"):
+            tokens = line[1:].split(None, 1)
+            directive = tokens[0].lower() if tokens else ""
+            rest = tokens[1].split("#")[0].rstrip() if len(tokens) > 1 else ""
+
+            if directive == "wait":
+                try:
+                    result.append(_Wait(float(rest)))
+                except ValueError:
+                    print(f"error: line {lineno}: '! wait' expects a number, got {rest!r}", file=sys.stderr)
+                    sys.exit(1)
+                i += 1
+
+            elif directive == "at":
+                try:
+                    parts = rest.split(":")
+                    if len(parts) != 3:
+                        raise ValueError
+                    h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+                except ValueError:
+                    print(f"error: line {lineno}: '! at' expects HH:MM:SS, got {rest!r}", file=sys.stderr)
+                    sys.exit(1)
+                result.append(_AtTime(h, m, s))
+                i += 1
+
+            elif directive == "echo":
+                result.append(_Echo(rest))
+                i += 1
+
+            elif directive == "for":
+                try:
+                    count = int(rest)
+                    if count < 0:
+                        raise ValueError
+                except ValueError:
+                    print(f"error: line {lineno}: '! for' expects a non-negative integer, got {rest!r}", file=sys.stderr)
+                    sys.exit(1)
+                body_start = i + 1
+                depth = 1
+                j = body_start
+                while j < end and depth > 0:
+                    _, jline = source[j]
+                    if jline.startswith("!"):
+                        jtoks = jline[1:].split(None, 1)
+                        jdir = jtoks[0].lower() if jtoks else ""
+                        if jdir == "for":
+                            depth += 1
+                        elif jdir == "endfor":
+                            depth -= 1
+                    j += 1
+                if depth != 0:
+                    print(f"error: line {lineno}: '! for' has no matching '! endfor'", file=sys.stderr)
+                    sys.exit(1)
+                body_end = j - 1  # index of the endfor line
+                body = _expand_run_script(source, script_args, _start=body_start, _end=body_end)
+                for _ in range(count):
+                    result.extend(body)
+                i = j  # resume after endfor
+
+            elif directive == "endfor":
+                print(f"error: line {lineno}: '! endfor' without matching '! for'", file=sys.stderr)
+                sys.exit(1)
+
+            elif directive == "exit":
+                result.append(_Exit())
+                i += 1
+
+            elif directive == "expect":
+                if not rest:
+                    print(f"error: line {lineno}: '! expect' requires a prefix", file=sys.stderr)
+                    sys.exit(1)
+                result.append(_Expect(rest, lineno))
+                i += 1
+
+            elif directive == "wait_tilt":
+                degrees = 15.0
+                if rest:
+                    try:
+                        degrees = float(rest)
+                        if degrees <= 0:
+                            raise ValueError
+                    except ValueError:
+                        print(f"error: line {lineno}: '! wait_tilt' expects a positive number, got {rest!r}", file=sys.stderr)
+                        sys.exit(1)
+                result.append(_WaitTilt(degrees))
+                i += 1
+
+            else:
+                print(f"error: line {lineno}: unknown directive '! {directive}'", file=sys.stderr)
+                sys.exit(1)
+
+        else:
+            line_argv = _preprocess_argv(line.split())
+            try:
+                line_args = parser.parse_args(line_argv)
+            except SystemExit:
+                print(f"error: line {lineno}: bad command: {line!r}", file=sys.stderr)
+                sys.exit(1)
+            if line_args.cmd in _NON_SCRIPT_CMDS:
+                print(
+                    f"warning: line {lineno}: '{line_args.cmd}' cannot be run, skipping: {line!r}",
+                    file=sys.stderr,
+                )
+                i += 1
+                continue
+            line_args.device = script_args.device
+            line_args.timeout = script_args.timeout
+            line_args.print_cmd = False  # cmd_run handles print_cmd itself
+            ble_cmd = _dispatch_to_ble_string(line_args)
+            if ble_cmd is not None:
+                result.append(ble_cmd)
+            i += 1
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -781,10 +1165,10 @@ def dispatch(args) -> None:
             do_send(args, f"SET_ALTAZ {args.alt} {args.az}")
         case "show-msg":
             dur = "INF" if args.duration.lower() == "inf" else args.duration
-            do_send(args, f"SHOW_MSG {dur} {args.text}")
+            do_send(args, f"SHOW_MSG {dur} {' '.join(args.text)}")
         case "show-msg-wait":
             dur = "INF" if args.duration.lower() == "inf" else args.duration
-            do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {args.text}")
+            do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {' '.join(args.text)}")
         case "night-mode":
             do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
         case "get-pitchroll":
@@ -838,8 +1222,22 @@ def dispatch(args) -> None:
             lines = [(i + 1, l.strip()) for i, l in enumerate(raw)
                      if l.strip() and not l.strip().startswith("#")]
             cmd_script(args, lines)
+        case "run":
+            if args.file != "-" and not pathlib.Path(args.file).exists():
+                print(f"error: file not found: {args.file!r}", file=sys.stderr)
+                sys.exit(1)
+            if args.file == "-":
+                raw = sys.stdin.read().splitlines()
+            else:
+                raw = pathlib.Path(args.file).read_text().splitlines()
+            lines = [(i + 1, l.strip()) for i, l in enumerate(raw)
+                     if l.strip() and not l.strip().startswith("#")]
+            items = _expand_run_script(lines, args)
+            run(cmd_run(args.device, items, args.timeout, args.print_cmd))
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
+        case "terminal" | "term":
+            run(cmd_terminal(args.device, args.timeout))
         case "scan":
             run(cmd_scan(args.timeout))
 

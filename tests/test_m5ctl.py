@@ -299,6 +299,71 @@ def test_resolve_default_device_unknown_warns_and_falls_through(m5ctl, monkeypat
 
 
 # ---------------------------------------------------------------------------
+# _terminal_line_to_ble — command translation for the interactive terminal
+# ---------------------------------------------------------------------------
+
+_TERM_ADDR = "AA:BB:CC:DD:EE:FF"
+_TERM_TIMEOUT = 5.0
+
+
+def _ble(m5ctl, line):
+    """Call _terminal_line_to_ble and return the result."""
+    return m5ctl._terminal_line_to_ble(line, _TERM_ADDR, _TERM_TIMEOUT)
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("ping",   "PING"),
+    ("tilt",   "GET_TILT"),
+    ("status", "GET_STATUS"),
+    ("calibrate-reset", "CALIBRATE_RESET"),
+    ("reboot", "REBOOT"),
+    ("persist", "PERSIST"),
+    ("stop-stream", "STOP_STREAM"),
+])
+def test_terminal_ble_simple_commands(m5ctl, line, expected):
+    assert _ble(m5ctl, line) == expected
+
+
+def test_terminal_ble_help_returns_help(m5ctl):
+    assert _ble(m5ctl, "help") == "HELP"
+    assert _ble(m5ctl, "?") == "HELP"
+
+
+def test_terminal_ble_raw_fallback(m5ctl):
+    """Strings that are not m5ctl subcommands are sent as raw BLE commands."""
+    assert _ble(m5ctl, "GET_TILT") == "GET_TILT"
+    assert _ble(m5ctl, "PING") == "PING"
+    assert _ble(m5ctl, "SOME_UNDOCUMENTED_CMD foo") == "SOME_UNDOCUMENTED_CMD foo"
+
+
+def test_terminal_ble_local_only_returns_none(m5ctl, capsys):
+    """Local-only commands return None and print a message."""
+    for cmd in ("list", "scan", "exec -", "script -", "run -"):
+        result = _ble(m5ctl, cmd)
+        assert result is None, f"expected None for {cmd!r}, got {result!r}"
+    capsys.readouterr()  # consume output
+
+
+def test_terminal_ble_listen_returns_none(m5ctl, capsys):
+    assert _ble(m5ctl, "listen") is None
+    capsys.readouterr()
+
+
+def test_terminal_ble_set_screen(m5ctl):
+    assert _ble(m5ctl, "set-screen BATTERY") == "SET_SCREEN BATTERY"
+    assert _ble(m5ctl, "set-screen CLINOMETER") == "SET_SCREEN CLINOMETER"
+
+
+def test_terminal_ble_beep(m5ctl):
+    assert _ble(m5ctl, "beep") == "BEEP"
+    assert _ble(m5ctl, "beep C4 E4 G4") == "BEEP C4 E4 G4"
+
+
+def test_terminal_ble_set_longitude(m5ctl):
+    assert _ble(m5ctl, "set-longitude -3.7") == "SET_LONGITUDE -3.7"
+
+
+# ---------------------------------------------------------------------------
 # version subcommand
 # ---------------------------------------------------------------------------
 
@@ -662,3 +727,359 @@ def test_print_cmd_flag_parses(m5ctl):
         assert args2.print_cmd is False
     finally:
         _sys.argv = old
+
+
+# ---------------------------------------------------------------------------
+# run command — directive expansion (_expand_run_script)
+# ---------------------------------------------------------------------------
+
+def _make_script_args(device="AA:BB:CC:DD:EE:FF", timeout=5.0, print_cmd=False):
+    """Return a minimal namespace that _expand_run_script and dispatch expect."""
+    import argparse
+    return argparse.Namespace(device=device, timeout=timeout, print_cmd=print_cmd)
+
+
+def _src(lines):
+    """Convert a list of strings to the (lineno, line) tuples _expand_run_script expects."""
+    return [(i + 1, l) for i, l in enumerate(lines)]
+
+
+def test_run_wait_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! wait 2.5"]), _make_script_args())
+    assert items == [m5ctl._Wait(2.5)]
+
+
+def test_run_wait_integer(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! wait 3"]), _make_script_args())
+    assert items == [m5ctl._Wait(3.0)]
+
+
+def test_run_echo_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! echo hello world"]), _make_script_args())
+    assert items == [m5ctl._Echo("hello world")]
+
+
+def test_run_echo_empty(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! echo"]), _make_script_args())
+    assert items == [m5ctl._Echo("")]
+
+
+def test_run_at_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! at 21:30:00"]), _make_script_args())
+    assert items == [m5ctl._AtTime(21, 30, 0)]
+
+
+def test_run_at_midnight(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! at 00:00:00"]), _make_script_args())
+    assert items == [m5ctl._AtTime(0, 0, 0)]
+
+
+def test_run_for_loop_expands(m5ctl):
+    src = _src(["! for 3", "! echo tick", "! endfor"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Echo("tick")] * 3
+
+
+def test_run_for_zero_iterations(m5ctl):
+    src = _src(["! for 0", "! echo never", "! endfor"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == []
+
+
+def test_run_for_single_iteration(m5ctl):
+    src = _src(["! for 1", "! echo once", "! endfor"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Echo("once")]
+
+
+def test_run_nested_for_loops(m5ctl):
+    src = _src([
+        "! for 2",
+        "! for 3",
+        "! echo x",
+        "! endfor",
+        "! endfor",
+    ])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Echo("x")] * 6
+
+
+def test_run_for_with_wait(m5ctl):
+    src = _src(["! for 2", "! wait 1.0", "! endfor"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Wait(1.0), m5ctl._Wait(1.0)]
+
+
+def test_run_mixed_directives_and_commands(m5ctl):
+    src = _src(["! echo start", "ping", "! wait 0.5"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items[0] == m5ctl._Echo("start")
+    assert items[1] == "PING"
+    assert items[2] == m5ctl._Wait(0.5)
+
+
+def test_run_ble_command_passthrough(m5ctl):
+    items = m5ctl._expand_run_script(_src(["ping"]), _make_script_args())
+    assert items == ["PING"]
+
+
+def test_run_beep_command_passthrough(m5ctl):
+    items = m5ctl._expand_run_script(_src(["beep C4 E4 G4"]), _make_script_args())
+    assert items == ["BEEP C4 E4 G4"]
+
+
+def test_run_unmatched_for_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! for 3", "! echo x"]), _make_script_args())
+
+
+def test_run_orphan_endfor_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! endfor"]), _make_script_args())
+
+
+def test_run_unknown_directive_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! jump 5"]), _make_script_args())
+
+
+def test_run_wait_bad_value_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! wait abc"]), _make_script_args())
+
+
+def test_run_at_bad_format_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! at 9am"]), _make_script_args())
+
+
+def test_run_for_bad_count_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! for abc", "! endfor"]), _make_script_args())
+
+
+def test_run_for_negative_count_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! for -1", "! endfor"]), _make_script_args())
+
+
+def test_run_non_script_cmd_skipped(m5ctl, capsys):
+    items = m5ctl._expand_run_script(_src(["scan"]), _make_script_args())
+    assert items == []
+    captured = capsys.readouterr()
+    assert "skipping" in captured.err
+
+
+def test_run_for_loop_body_after_loop(m5ctl):
+    src = _src(["! for 2", "! echo a", "! endfor", "! echo b"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Echo("a"), m5ctl._Echo("a"), m5ctl._Echo("b")]
+
+
+# ---------------------------------------------------------------------------
+# run command — wait_tilt directive
+# ---------------------------------------------------------------------------
+
+def test_run_wait_tilt_default(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! wait_tilt"]), _make_script_args())
+    assert items == [m5ctl._WaitTilt(15.0)]
+
+
+def test_run_wait_tilt_custom(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! wait_tilt 10"]), _make_script_args())
+    assert items == [m5ctl._WaitTilt(10.0)]
+
+
+def test_run_wait_tilt_float(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! wait_tilt 7.5"]), _make_script_args())
+    assert items == [m5ctl._WaitTilt(7.5)]
+
+
+def test_run_wait_tilt_bad_value_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! wait_tilt abc"]), _make_script_args())
+
+
+def test_run_wait_tilt_zero_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! wait_tilt 0"]), _make_script_args())
+
+
+def test_run_wait_tilt_negative_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! wait_tilt -5"]), _make_script_args())
+
+
+# ---------------------------------------------------------------------------
+# run command — exit directive
+# ---------------------------------------------------------------------------
+
+def test_run_exit_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! exit"]), _make_script_args())
+    assert items == [m5ctl._Exit()]
+
+
+def test_run_exit_stops_expansion(m5ctl):
+    src = _src(["! echo a", "! exit", "! echo b"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Echo("a"), m5ctl._Exit(), m5ctl._Echo("b")]
+
+
+def test_run_exit_with_trailing_text_ignored(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! exit debug checkpoint"]), _make_script_args())
+    assert items == [m5ctl._Exit()]
+
+
+def test_run_exit_in_for_loop(m5ctl):
+    src = _src(["! for 3", "! exit", "! endfor"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items == [m5ctl._Exit(), m5ctl._Exit(), m5ctl._Exit()]
+
+
+# ---------------------------------------------------------------------------
+# run command — expect directive
+# ---------------------------------------------------------------------------
+
+def test_run_expect_single_word(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! expect TILT"]), _make_script_args())
+    assert items == [m5ctl._Expect("TILT", 1)]
+
+
+def test_run_expect_multi_word(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! expect EVENT SCREEN TIME"]), _make_script_args())
+    assert items == [m5ctl._Expect("EVENT SCREEN TIME", 1)]
+
+
+def test_run_expect_single_token_prefix(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! expect OK"]), _make_script_args())
+    assert items == [m5ctl._Expect("OK", 1)]
+
+
+def test_run_expect_no_prefix_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! expect"]), _make_script_args())
+
+
+def test_run_expect_case_preserved(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! expect Event Screen"]), _make_script_args())
+    assert items == [m5ctl._Expect("Event Screen", 1)]
+
+
+def test_run_expect_inline_comment_stripped(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["! expect EVENT SCREEN CLINOMETER  # wait for screen change"]),
+        _make_script_args(),
+    )
+    assert items == [m5ctl._Expect("EVENT SCREEN CLINOMETER", 1)]
+
+
+def test_run_expect_no_prefix_after_comment_strip_exits(m5ctl):
+    """'! expect # comment' strips to empty prefix → error."""
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! expect # comment"]), _make_script_args())
+
+
+# ---------------------------------------------------------------------------
+# run command — apostrophe in note names (octave marker)
+# ---------------------------------------------------------------------------
+
+def test_run_beep_apostrophe_note(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["beep C4 E4 G4 C'4 G4 E4 C4"]), _make_script_args()
+    )
+    assert items == ["BEEP C4 E4 G4 C'4 G4 E4 C4"]
+
+
+def test_run_show_msg_apostrophe_text(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["show-msg 5 it's fine"]), _make_script_args()
+    )
+    assert items == ["SHOW_MSG 5 it's fine"]
+
+
+# ---------------------------------------------------------------------------
+# cmd_run — look-ahead: plain BLE command followed by ! expect
+# ---------------------------------------------------------------------------
+
+def _make_cmd_run_harness(m5ctl, monkeypatch, responses_by_command: dict):
+    """Patches _connect/_start_notify so cmd_run runs without a real device.
+
+    responses_by_command maps BLE command string to list of reply strings.
+    All replies for a command are injected into the queue at write time.
+    """
+    from contextlib import asynccontextmanager
+
+    notify_cb = []
+
+    class _FakeClient:
+        async def write_gatt_char(self, uuid, data, response=False):
+            cmd = data.decode("utf-8")
+            for msg in responses_by_command.get(cmd, []):
+                notify_cb[0](None, bytearray(msg.encode("utf-8")))
+
+    @asynccontextmanager
+    async def _fake_connect(address, timeout):
+        yield _FakeClient()
+
+    async def _fake_start_notify(client, uuid, callback, retries=3):
+        notify_cb.append(callback)
+
+    monkeypatch.setattr(m5ctl, "_connect", _fake_connect)
+    monkeypatch.setattr(m5ctl, "_start_notify", _fake_start_notify)
+
+
+async def test_cmd_run_plain_command_no_expect(m5ctl, monkeypatch, capsys):
+    """Plain command with no following _Expect: auto-consume still works."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"PING": ["OK PONG"]})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", ["PING"], timeout=5.0, print_cmd=False)
+    assert "OK PONG" in capsys.readouterr().out
+
+
+async def test_cmd_run_plain_then_expect_same_response(m5ctl, monkeypatch, capsys):
+    """Regression: PING + _Expect("OK PONG") — expect must see the reply, not time out."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"PING": ["OK PONG"]})
+    items = ["PING", m5ctl._Expect("OK PONG", 2)]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    out = capsys.readouterr().out
+    assert out.count("OK PONG") == 1
+
+
+async def test_cmd_run_show_msg_with_two_expects(m5ctl, monkeypatch, capsys):
+    """demo.m5s pattern: one command, three notifications, two _Expect items drain them all."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {
+        "SHOW_MSG 2 Demo": ["OK MESSAGE", "EVENT SCREEN MESSAGE", "EVENT SCREEN CLINOMETER"],
+    })
+    items = [
+        "SHOW_MSG 2 Demo",
+        m5ctl._Expect("EVENT SCREEN MESSAGE", 2),
+        m5ctl._Expect("EVENT SCREEN CLINOMETER", 3),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    lines = capsys.readouterr().out.splitlines()
+    assert "OK MESSAGE" in lines
+    assert "EVENT SCREEN MESSAGE" in lines
+    assert "EVENT SCREEN CLINOMETER" in lines
+
+
+async def test_cmd_run_two_plain_commands(m5ctl, monkeypatch, capsys):
+    """Two consecutive plain commands with no _Expect: each still consumes its own reply."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"PING": ["OK PONG"], "GET_STATUS": ["OK STATUS"]})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", ["PING", "GET_STATUS"], timeout=5.0, print_cmd=False)
+    out = capsys.readouterr().out
+    assert "OK PONG" in out
+    assert "OK STATUS" in out
+
+
+async def test_cmd_run_last_command_still_consumed(m5ctl, monkeypatch, capsys):
+    """Last item in list has no successor (next_item is None): auto-consume fires normally."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"GET_TILT": ["TILT 1.0 2.0"]})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", ["GET_TILT"], timeout=5.0, print_cmd=False)
+    assert "TILT 1.0 2.0" in capsys.readouterr().out
+
+
+async def test_cmd_run_command_followed_by_wait_still_consumed(m5ctl, monkeypatch, capsys):
+    """_Wait after a plain command is not _Expect: auto-consume still fires."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"PING": ["OK PONG"]})
+    items = ["PING", m5ctl._Wait(0.0)]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "OK PONG" in capsys.readouterr().out

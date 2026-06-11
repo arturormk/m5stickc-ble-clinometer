@@ -81,6 +81,7 @@ struct DeviceState {
 
     bool     nightMode;
     uint32_t lastBleCommandMs;  // millis() of last BLE command or connection
+    uint32_t lastCalibrateMs;   // millis() of last CALIBRATE or CALIBRATE_RESET
 
     MelodyNote       melodyNotes[MELODY_MAX_NOTES];
     volatile int     melodyPendingLength;

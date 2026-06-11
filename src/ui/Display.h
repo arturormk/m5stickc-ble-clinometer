@@ -13,6 +13,7 @@ private:
     static constexpr uint8_t  BRIGHTNESS_DIM   = 30;
     static constexpr uint8_t  BRIGHTNESS_NIGHT = 40;
     static constexpr uint32_t DIM_TIMEOUT_MS   = 60000;
+    static constexpr uint32_t SKIP_GRACE_MS    = 30000;
     static constexpr float    DIM_STABLE_DEG   = 5.0f;
 
     LGFX_Sprite* _sprite = nullptr;
@@ -29,6 +30,7 @@ private:
     float    _dimPitchRef        = 0.0f;
     float    _dimRollRef         = 0.0f;
     uint32_t _lastTiltActivityMs = 0;
+    uint32_t _lastTiltChangeMs   = 0;
     uint8_t  _currentBrightness  = BRIGHTNESS_FULL;
 
     void _updateBrightness(const DeviceState& state);

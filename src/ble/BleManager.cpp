@@ -706,10 +706,12 @@ static void processCommand(const char* raw) {
             if (s_imu) s_imu->calibrate(rgx, rgy, rgz);
         }
         snprintf(resp, sizeof(resp), "CALIBRATED %+.4f %+.4f %+.4f", rgx, rgy, rgz);
+        s_state->lastCalibrateMs = millis();
 
     } else if (strcasecmp(tok, "CALIBRATE_RESET") == 0) {
         if (s_imu) s_imu->resetCalibration();
         strncpy(resp, "OK CALIBRATION_RESET", sizeof(resp) - 1);
+        s_state->lastCalibrateMs = millis();
 
     } else if (strcasecmp(tok, "PERSIST") == 0) {
         char* sub = strtok_r(nullptr, " ", &saveptr);

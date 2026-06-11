@@ -1,0 +1,359 @@
+# demo.m5s — full device demo script
+# Showcases screens, sensor data, night mode, melody, button and tilt interaction.
+#
+# Usage:
+#   m5ctl run tools/demo.m5s
+#   m5ctl -p run tools/demo.m5s    # trace BLE commands to stderr
+
+# ---------------------------------------------------------------------------
+# 1 — Welcome + connectivity check + presets
+# ---------------------------------------------------------------------------
+
+! echo === M5 Device Demo ===
+! echo 
+
+night-mode off
+! expect OK NIGHT_MODE OFF
+
+set-screen CLINOMETER
+! wait 1  # if already in CLINOMETER we would not receive an event
+
+show-msg 2 M5 Clinometer Demo
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+
+! echo
+! echo -- Connectivity --
+! echo
+
+ping
+! expect OK PONG
+
+get-board
+! expect BOARD
+
+status
+! expect STATUS
+
+get-time
+! expect TIME
+
+! echo
+! echo -- Setup --
+! echo
+
+set-time-now
+! expect OK TIME
+
+set-longitude -4.319644
+! expect OK LONGITUDE
+
+set-timezone UTC
+! expect OK TIMEZONE
+
+set-radec 06:45:09 -16:42:58
+! expect OK RADEC
+
+set-altaz +32:48:27 175:55:55
+! expect OK ALTAZ
+
+! wait 2
+
+# ---------------------------------------------------------------------------
+# 2 — Screen tour
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Screen tour --
+! echo
+
+show-msg 1 SCREEN TOUR
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 1
+
+show-msg 1 Clinometer Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 3
+
+show-msg 1 Clock Screen (UTC)
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+set-screen TIME
+! expect EVENT SCREEN TIME
+! wait 3
+
+show-msg 1 Clock Screen (Sidereal Time)
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN TIME
+! wait 0.5
+set-timezone LST
+! expect OK TIMEZONE
+! wait 3
+
+show-msg 1 Clock Screen (CET)
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN TIME
+! wait 0.5
+set-timezone CET
+! expect OK TIMEZONE
+! wait 3
+
+show-msg 1 Clock Screen (CEST)
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN TIME
+! wait 0.5
+set-timezone CEST
+! expect OK TIMEZONE
+! wait 3
+
+show-msg 1 Clock Screen (JST)
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN TIME
+! wait 0.5
+set-timezone JST
+! expect OK TIMEZONE
+! wait 2
+set-timezone JST 日本標準時
+! expect OK TIMEZONE
+! wait 2
+
+show-msg 1 Right Ascension / Declination Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN TIME
+set-screen RADEC
+! expect EVENT SCREEN RADEC
+! wait 3
+
+show-msg 1 Altitude / Azimuth Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN RADEC
+set-screen ALTAZ
+! expect EVENT SCREEN ALTAZ
+! wait 3
+
+show-msg 1 Battery Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN ALTAZ
+set-screen BATTERY
+! expect EVENT SCREEN BATTERY
+! wait 3
+
+show-msg 1 Status Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN BATTERY
+set-screen SYSINFO-1
+! expect EVENT SCREEN SYSINFO-1
+! wait 3
+
+show-msg 1 Stack Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN SYSINFO-1
+set-screen SYSINFO-2
+! expect EVENT SCREEN SYSINFO-2
+! wait 3
+
+show-msg 1 Heap Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN SYSINFO-2
+set-screen SYSINFO-3
+! expect EVENT SCREEN SYSINFO-3
+! wait 3
+
+show-msg 1 System Info Screen
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN SYSINFO-3
+set-screen SYSINFO-4
+! expect EVENT SCREEN SYSINFO-4
+! wait 3
+
+set-screen CLINOMETER
+! expect EVENT SCREEN CLINOMETER
+! wait 2
+
+
+# 3 — Live tilt readings
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Live tilt readings (poll 3x) --
+! echo
+
+! for 3
+tilt
+! expect TILT
+! wait 1
+! endfor
+
+
+# ---------------------------------------------------------------------------
+# 4 — Night mode
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Night mode --
+! echo
+
+show-msg 1 Night mode ON
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 1
+night-mode on
+! expect OK NIGHT_MODE ON
+! wait 3
+
+show-msg 1 Night mode OFF
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 1
+night-mode off
+! expect OK NIGHT_MODE OFF
+! wait 3
+
+
+# ---------------------------------------------------------------------------
+# 5 — Melody
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Melody --
+! echo
+
+show-msg 1 Melody
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+beep C4 E4 G4 C'4 G4 E4 C4
+! expect OK BEEP
+! wait 4
+
+
+# ---------------------------------------------------------------------------
+# 6 — Button interaction
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Button demo: press M5 on the device to continue --
+! echo
+
+show-msg-wait inf M5 Press M5 to continue
+! expect EVENT SCREEN MESSAGE
+! expect EVENT BUTTON M5
+cancel-msg
+! expect EVENT SCREEN CLINOMETER
+
+! echo "Button pressed — moving on."
+beep G8 E4
+! expect OK BEEP
+
+! wait 2
+
+
+# ---------------------------------------------------------------------------
+# 7 — Tilt interaction
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Tilt demo: tilt the device more than 15 degrees --
+! echo
+
+show-msg inf Tilt me!
+! expect EVENT SCREEN MESSAGE
+! wait_tilt 15
+cancel-msg
+! expect EVENT SCREEN CLINOMETER
+
+! echo "Tilt detected — nice work!"
+beep E8 G4
+! expect OK BEEP
+
+! wait 1
+
+
+# ---------------------------------------------------------------------------
+# 8 — Axes
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Clinometer axes --
+! echo
+
+show-msg 1 CLINOMETER AXES
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 1
+
+set-pitchroll +X,+Y
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll +Y,+X
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll -X,+Y
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll -Y,+X
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll +X,-Y
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll +Y,-X
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll -X,-Y
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll -Y,-X
+! expect OK PITCHROLL
+! wait 0.5
+
+set-pitchroll +X,+Y
+! expect OK PITCHROLL
+
+
+# ---------------------------------------------------------------------------
+# 9 — Calibration
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Clinometer calibration --
+! echo
+
+show-msg 1 CLINOMETER CALIBRATION
+! expect EVENT SCREEN MESSAGE
+! expect EVENT SCREEN CLINOMETER
+! wait 3
+
+calibrate
+! expect CALIBRATED
+! wait 8
+
+calibrate-reset
+! expect OK CALIBRATION_RESET
+! wait 4
+
+
+# ---------------------------------------------------------------------------
+# 10 — Finale
+# ---------------------------------------------------------------------------
+
+! echo 
+! echo -- Done --
+! echo
+
+show-msg 5 Demo complete!
+! expect EVENT SCREEN MESSAGE
+beep C'8 E'8 G'8 C''4 -8 G'8 A'8 G'8 E'8 C'4 -8 F'8 G'8 C''2
+! expect OK BEEP
+! expect EVENT SCREEN CLINOMETER
+
+! echo 
+! echo === Demo finished ===
