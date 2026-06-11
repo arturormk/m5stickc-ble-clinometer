@@ -1414,6 +1414,7 @@ On every connection the viewer sends `GET_BOARD` and `GET_PITCHROLL` to the devi
 | `1` | Switch to M5StickC Plus 2 model |
 | `2` | Switch to M5Stack Core 2 model |
 | `3` | Switch to M5Stack CoreS3 model |
+| `4` | Switch to M5StickS3 model |
 | `C` | Toggle axis display: IMU frame ↔ UX/screen frame |
 | `Q` / `Esc` | Quit |
 

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Build / M5StickC Plus 2** — `[env:m5stickc-plus2]` was missing
+  `BOARD_HAS_PSRAM` and `-mfix-esp32-psram-cache-issue`. The Plus 2 ships
+  with 2 MB PSRAM; without `BOARD_HAS_PSRAM` the Arduino/ESP-IDF layer does
+  not initialise the PSRAM heap, and without the cache-fix flag the compiler
+  can generate incorrect code for the ESP32 PSRAM cache errata.
+  `CORE_DEBUG_LEVEL=0` is added explicitly so the environment is
+  self-contained when overriding the base `build_flags`.
+- **Build / M5Stack Core2** — `[env:m5stack-core2]` was missing the same two
+  flags for the same reasons (Core2 also carries PSRAM on an ESP32).
+  `CORE_DEBUG_LEVEL=0` added for the same self-containment reason.
+- **Build / M5Stack CoreS3** — `[env:m5stack-cores3]` was missing
+  `CORE_DEBUG_LEVEL=0` and `BOARD_HAS_PSRAM`. (`-mfix-esp32-psram-cache-issue`
+  is not applicable to the ESP32-S3 and is intentionally absent.)
+- **Docs / 3D viewer** — the keyboard shortcut table in the README was missing
+  the `4` → M5StickS3 entry. Key `4` has been functional since v1.2.0 but was
+  not documented.
+
 ## [1.2.0] — 2026-06-10
 
 ### Fixed
