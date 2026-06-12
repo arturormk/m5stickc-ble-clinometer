@@ -1236,6 +1236,21 @@ def test_run_set_bad_name_exits(m5ctl):
         m5ctl._expand_run_script(_src(["! set bad name"]), _make_script_args())
 
 
+def test_run_unset_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! unset foo"]), _make_script_args())
+    assert items == [m5ctl._UnsetVar("foo")]
+
+
+def test_run_unset_underscore_name(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! unset my_flag_123"]), _make_script_args())
+    assert items == [m5ctl._UnsetVar("my_flag_123")]
+
+
+def test_run_unset_bad_name_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! unset bad name"]), _make_script_args())
+
+
 def test_run_if_no_name_exits(m5ctl):
     with pytest.raises(SystemExit):
         m5ctl._expand_run_script(_src(["! if", "! endif"]), _make_script_args())
@@ -1406,6 +1421,63 @@ async def test_cmd_run_set_inside_skip_has_no_effect(m5ctl, monkeypatch, capsys)
     ]
     await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
     assert "foo_was_set" not in capsys.readouterr().out
+
+
+async def test_cmd_run_set_then_unset_then_if(m5ctl, monkeypatch, capsys):
+    """! set foo then ! unset foo → ! if foo → if-block skipped."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._SetVar("foo"),
+        m5ctl._UnsetVar("foo"),
+        m5ctl._IfVar("foo", False, lineno=1),
+        m5ctl._Echo("foo_was_set"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "foo_was_set" not in capsys.readouterr().out
+
+
+async def test_cmd_run_unset_cli_flag(m5ctl, monkeypatch, capsys):
+    """! unset a flag supplied via --set → ! if block skipped."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._UnsetVar("noninteractive"),
+        m5ctl._IfVar("noninteractive", False, lineno=1),
+        m5ctl._Echo("noninteractive_branch"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False,
+                        flags=frozenset({"noninteractive"}))
+    assert "noninteractive_branch" not in capsys.readouterr().out
+
+
+async def test_cmd_run_unset_already_unset_is_noop(m5ctl, monkeypatch, capsys):
+    """! unset on a flag that was never set is a silent no-op."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._UnsetVar("ghost"),
+        m5ctl._Echo("after_unset"),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "after_unset" in capsys.readouterr().out
+
+
+async def test_cmd_run_unset_inside_skip_has_no_effect(m5ctl, monkeypatch, capsys):
+    """! unset inside a skipped block must not affect flags_mutable."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        # skipped block that tries to unset "foo"
+        m5ctl._IfVar("never", False, lineno=1),
+        m5ctl._UnsetVar("foo"),
+        m5ctl._EndIf(lineno=2),
+        # foo was set via CLI; should still be set after the skipped unset
+        m5ctl._IfVar("foo", False, lineno=3),
+        m5ctl._Echo("foo_still_set"),
+        m5ctl._EndIf(lineno=4),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False,
+                        flags=frozenset({"foo"}))
+    assert "foo_still_set" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

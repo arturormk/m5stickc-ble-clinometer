@@ -3,7 +3,8 @@
 #
 # Usage:
 #   m5ctl run tools/demo.m5s
-#   m5ctl -p run tools/demo.m5s    # trace BLE commands to stderr
+#   m5ctl -p run tools/demo.m5s                         # trace BLE commands to stderr
+#   m5ctl run tools/demo.m5s --set noninteractive=true  # skip button/tilt sections
 
 # ---------------------------------------------------------------------------
 # 1 — Welcome + connectivity check + presets

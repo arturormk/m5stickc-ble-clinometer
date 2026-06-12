@@ -407,6 +407,8 @@ async def cmd_run(
                 print(item.text)
             elif isinstance(item, _SetVar):
                 flags_mutable.add(item.name)
+            elif isinstance(item, _UnsetVar):
+                flags_mutable.discard(item.name)
             elif isinstance(item, _WaitTilt):
                 matched = await _exec_wait_tilt(
                     item.degrees, client, queue, timeout, float("inf"), print_cmd
@@ -614,6 +616,10 @@ class _IfVar(NamedTuple):
 
 
 class _SetVar(NamedTuple):
+    name: str
+
+
+class _UnsetVar(NamedTuple):
     name: str
 
 
@@ -867,7 +873,7 @@ p.add_argument("file", metavar="FILE",
 p = sub.add_parser("script",  help="Run m5ctl commands from a file over one BLE connection")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands, one per line (use - for stdin)")
-p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo/expect/timeout/if/if_not/set)")
+p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo/expect/timeout/if/if_not/set/unset)")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands and ! directives, one per line (use - for stdin)")
 p.add_argument("--set", dest="flags", action="append", default=[], metavar="NAME",
@@ -1222,6 +1228,14 @@ def _expand_run_script(
                     print(f"error: line {lineno}: '! set' requires a valid identifier, got {name!r}", file=sys.stderr)
                     sys.exit(1)
                 result.append(_SetVar(name))
+                i += 1
+
+            elif directive == "unset":
+                name = rest.strip()
+                if not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]*', name):
+                    print(f"error: line {lineno}: '! unset' requires a valid identifier, got {name!r}", file=sys.stderr)
+                    sys.exit(1)
+                result.append(_UnsetVar(name))
                 i += 1
 
             elif directive == "else":

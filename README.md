@@ -1430,8 +1430,9 @@ Lines whose first non-whitespace character sequence is `!` are interpreted as di
 | `! else` | Flip the active branch inside a `! if` / `! if_not` block. |
 | `! endif` | Close the innermost `! if` / `! if_not` block. |
 | `! set <name>` | Set a named flag. Has no effect when inside a skipped block. |
+| `! unset <name>` | Clear a named flag. No-op if the flag is not currently set. Has no effect when inside a skipped block. |
 
-Flags are script-global boolean variables. A flag is either set or unset; `! if` / `! if_not` tests the current state at runtime. The reserved flag `timedout` is written automatically by `! timeout`. Flags can also be pre-set from the command line with `--set NAME` (repeatable) before the script starts — for example `--set noninteractive` lets the script detect that it is running unattended.
+Flags are script-global boolean variables. A flag is either set or unset; `! if` / `! if_not` tests the current state at runtime. The reserved flag `timedout` is written automatically by `! timeout`. Flags can also be pre-set from the command line with `--set NAME` (repeatable) before the script starts — for example `--set noninteractive` lets the script detect that it is running unattended. Use `! unset` to clear a CLI-supplied flag for a specific section.
 
 Identifiers must match `[a-zA-Z_][a-zA-Z0-9_]*`.
 
@@ -1579,7 +1580,7 @@ The `-p` flag echoes each BLE command to stderr as it is sent, which is useful f
 | Tilt wait | None | `! wait_tilt` |
 | Timed interaction | None | `! timeout <secs> <directive>` |
 | Conditionals | None | `! if <name>` / `! if_not <name>` / `! else` / `! endif` |
-| Script flags | None | `! set <name>` · `--set NAME` |
+| Script flags | None | `! set <name>` · `! unset <name>` · `--set NAME` |
 | Early exit | None | `! exit` |
 | Best for | Setup scripts (fast, minimal connect time) | Demos, video narration, timed automation |
 
