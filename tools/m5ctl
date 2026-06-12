@@ -355,6 +355,7 @@ async def cmd_run(
     items: list,
     timeout: float,
     print_cmd: bool,
+    flags: frozenset[str] = frozenset(),
 ) -> None:
     """Execute a flat list of BLE commands and directives over a single connection."""
     queue: "asyncio.Queue[str]" = asyncio.Queue()
@@ -364,12 +365,12 @@ async def cmd_run(
 
     async with _connect(address, CONNECT_TIMEOUT) as client:
         await _start_notify(client, RESP_UUID, on_notify)
-        timed_out: bool = False
+        flags_mutable: set[str] = set(flags)
         skip: bool = False
         for idx, item in enumerate(items):
-            if isinstance(item, (_IfTimedOut, _Else, _EndIf)):
-                if isinstance(item, _IfTimedOut):
-                    skip = not timed_out
+            if isinstance(item, (_IfVar, _Else, _EndIf)):
+                if isinstance(item, _IfVar):
+                    skip = (item.name in flags_mutable) == item.negated
                 elif isinstance(item, _Else):
                     skip = not skip
                 else:
@@ -391,6 +392,8 @@ async def cmd_run(
                     await asyncio.sleep(delta)
             elif isinstance(item, _Echo):
                 print(item.text)
+            elif isinstance(item, _SetVar):
+                flags_mutable.add(item.name)
             elif isinstance(item, _WaitTilt):
                 matched = await _exec_wait_tilt(
                     item.degrees, client, queue, timeout, float("inf"), print_cmd
@@ -415,7 +418,10 @@ async def cmd_run(
                     matched = await _exec_wait_tilt(
                         item.item.degrees, client, queue, timeout, deadline, print_cmd
                     )
-                timed_out = not matched
+                if matched:
+                    flags_mutable.discard("timedout")
+                else:
+                    flags_mutable.add("timedout")
             elif isinstance(item, _Exit):
                 break
             else:
@@ -588,8 +594,14 @@ class _Timeout(NamedTuple):
     item: object      # _Expect | _WaitTilt — the wrapped directive
 
 
-class _IfTimedOut(NamedTuple):
+class _IfVar(NamedTuple):
+    name: str       # flag identifier, e.g. "timedout" or "noninteractive"
+    negated: bool   # True for ! if_not, False for ! if
     lineno: int
+
+
+class _SetVar(NamedTuple):
+    name: str
 
 
 class _Else(NamedTuple):
@@ -832,9 +844,11 @@ p.add_argument("file", metavar="FILE",
 p = sub.add_parser("script",  help="Run m5ctl commands from a file over one BLE connection")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands, one per line (use - for stdin)")
-p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo/expect/timeout/if_timed_out)")
+p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo/expect/timeout/if/if_not/set)")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands and ! directives, one per line (use - for stdin)")
+p.add_argument("--set", dest="flags", action="append", default=[], metavar="NAME",
+               help="Pre-set a script flag before execution (repeatable, e.g. --set noninteractive)")
 sub.add_parser("terminal", aliases=["term"],
                help="Open an interactive BLE terminal (persistent connection, live notifications)")
 
@@ -1170,17 +1184,29 @@ def _expand_run_script(
                 result.append(_Timeout(max_wait, inner_item))
                 i += 1
 
-            elif directive == "if_timed_out":
+            elif directive in ("if", "if_not"):
+                name = rest.strip()
+                if not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]*', name):
+                    print(f"error: line {lineno}: '! {directive}' requires a valid identifier, got {name!r}", file=sys.stderr)
+                    sys.exit(1)
                 if_depth += 1
-                result.append(_IfTimedOut(lineno))
+                result.append(_IfVar(name, negated=(directive == "if_not"), lineno=lineno))
+                i += 1
+
+            elif directive == "set":
+                name = rest.strip()
+                if not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_]*', name):
+                    print(f"error: line {lineno}: '! set' requires a valid identifier, got {name!r}", file=sys.stderr)
+                    sys.exit(1)
+                result.append(_SetVar(name))
                 i += 1
 
             elif directive == "else":
                 if if_depth == 0:
-                    print(f"error: line {lineno}: '! else' without matching '! if_timed_out'", file=sys.stderr)
+                    print(f"error: line {lineno}: '! else' without matching '! if' or '! if_not'", file=sys.stderr)
                     sys.exit(1)
                 if if_depth in seen_else_depths:
-                    print(f"error: line {lineno}: duplicate '! else' in '! if_timed_out' block", file=sys.stderr)
+                    print(f"error: line {lineno}: duplicate '! else' in '! if' block", file=sys.stderr)
                     sys.exit(1)
                 seen_else_depths.add(if_depth)
                 result.append(_Else(lineno))
@@ -1188,7 +1214,7 @@ def _expand_run_script(
 
             elif directive == "endif":
                 if if_depth == 0:
-                    print(f"error: line {lineno}: '! endif' without matching '! if_timed_out'", file=sys.stderr)
+                    print(f"error: line {lineno}: '! endif' without matching '! if' or '! if_not'", file=sys.stderr)
                     sys.exit(1)
                 seen_else_depths.discard(if_depth)
                 if_depth -= 1
@@ -1222,10 +1248,10 @@ def _expand_run_script(
             i += 1
 
     if if_depth != 0:
-        # Find the last unclosed if_timed_out lineno from the emitted markers
         for item in reversed(result):
-            if isinstance(item, _IfTimedOut):
-                print(f"error: line {item.lineno}: '! if_timed_out' has no matching '! endif'", file=sys.stderr)
+            if isinstance(item, _IfVar):
+                directive = "if_not" if item.negated else "if"
+                print(f"error: line {item.lineno}: '! {directive} {item.name}' has no matching '! endif'", file=sys.stderr)
                 break
         sys.exit(1)
 
@@ -1390,7 +1416,8 @@ def dispatch(args) -> None:
             lines = [(i + 1, l.strip()) for i, l in enumerate(raw)
                      if l.strip() and not l.strip().startswith("#")]
             items = _expand_run_script(lines, args)
-            run(cmd_run(args.device, items, args.timeout, args.print_cmd))
+            run(cmd_run(args.device, items, args.timeout, args.print_cmd,
+                        flags=frozenset(args.flags or [])))
         case "listen":
             run(cmd_listen(args.device, stream_ms=args.stream))
         case "terminal" | "term":

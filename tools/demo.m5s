@@ -241,7 +241,7 @@ show-msg-wait inf M5 Press M5 to continue
 ! timeout 10 expect EVENT BUTTON M5
 cancel-msg
 ! expect EVENT SCREEN CLINOMETER
-! if_timed_out
+! if timedout
 ! echo "Demo continuing automatically."
 ! else
 ! echo "Button pressed — moving on."
@@ -265,7 +265,7 @@ show-msg inf Tilt me!
 ! timeout 10 wait_tilt 15
 cancel-msg
 ! expect EVENT SCREEN CLINOMETER
-! if_timed_out
+! if timedout
 ! echo "Demo continuing automatically."
 ! else
 ! echo "Tilt detected — nice work!"

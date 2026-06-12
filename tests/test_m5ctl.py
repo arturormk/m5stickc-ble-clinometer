@@ -1176,25 +1176,69 @@ def test_run_timeout_expect_no_prefix_exits(m5ctl):
 
 
 # ---------------------------------------------------------------------------
-# run command — if_timed_out / else / endif (parse-time)
+# run command — if / if_not / set / else / endif (parse-time)
 # ---------------------------------------------------------------------------
 
-def test_run_if_timed_out_no_else(m5ctl):
-    src = _src(["! if_timed_out", "! echo a", "! endif"])
-    items = m5ctl._expand_run_script(src, _make_script_args())
-    assert items[0] == m5ctl._IfTimedOut(1)
+def test_run_if_name(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! if foo", "! echo a", "! endif"]), _make_script_args())
+    assert items[0] == m5ctl._IfVar("foo", False, 1)
     assert items[1] == m5ctl._Echo("a")
     assert items[2] == m5ctl._EndIf(3)
 
 
-def test_run_if_timed_out_with_else(m5ctl):
-    src = _src(["! if_timed_out", "! echo a", "! else", "! echo b", "! endif"])
+def test_run_if_not_name(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! if_not foo", "! echo a", "! endif"]), _make_script_args())
+    assert items[0] == m5ctl._IfVar("foo", True, 1)
+    assert items[1] == m5ctl._Echo("a")
+    assert items[2] == m5ctl._EndIf(3)
+
+
+def test_run_if_with_else(m5ctl):
+    src = _src(["! if foo", "! echo a", "! else", "! echo b", "! endif"])
     items = m5ctl._expand_run_script(src, _make_script_args())
-    assert items[0] == m5ctl._IfTimedOut(1)
+    assert items[0] == m5ctl._IfVar("foo", False, 1)
     assert items[1] == m5ctl._Echo("a")
     assert items[2] == m5ctl._Else(3)
     assert items[3] == m5ctl._Echo("b")
     assert items[4] == m5ctl._EndIf(5)
+
+
+def test_run_if_timedout(m5ctl):
+    """! if timedout uses the reserved 'timedout' flag — no special syntax."""
+    items = m5ctl._expand_run_script(
+        _src(["! if timedout", "! echo a", "! endif"]), _make_script_args()
+    )
+    assert items[0] == m5ctl._IfVar("timedout", False, 1)
+
+
+def test_run_set_directive(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! set foo"]), _make_script_args())
+    assert items == [m5ctl._SetVar("foo")]
+
+
+def test_run_set_underscore_name(m5ctl):
+    items = m5ctl._expand_run_script(_src(["! set my_flag_123"]), _make_script_args())
+    assert items == [m5ctl._SetVar("my_flag_123")]
+
+
+def test_run_if_bad_name_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! if bad-name", "! endif"]), _make_script_args())
+
+
+def test_run_if_not_bad_name_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! if_not 123bad", "! endif"]), _make_script_args())
+
+
+def test_run_set_bad_name_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! set bad name"]), _make_script_args())
+
+
+def test_run_if_no_name_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! if", "! endif"]), _make_script_args())
 
 
 def test_run_orphan_else_exits(m5ctl):
@@ -1207,13 +1251,13 @@ def test_run_orphan_endif_exits(m5ctl):
         m5ctl._expand_run_script(_src(["! endif"]), _make_script_args())
 
 
-def test_run_unclosed_if_timed_out_exits(m5ctl):
+def test_run_unclosed_if_exits(m5ctl):
     with pytest.raises(SystemExit):
-        m5ctl._expand_run_script(_src(["! if_timed_out", "! echo a"]), _make_script_args())
+        m5ctl._expand_run_script(_src(["! if foo", "! echo a"]), _make_script_args())
 
 
 def test_run_double_else_exits(m5ctl):
-    src = _src(["! if_timed_out", "! echo a", "! else", "! echo b", "! else", "! echo c", "! endif"])
+    src = _src(["! if foo", "! echo a", "! else", "! echo b", "! else", "! echo c", "! endif"])
     with pytest.raises(SystemExit):
         m5ctl._expand_run_script(src, _make_script_args())
 
@@ -1223,7 +1267,7 @@ def test_run_double_else_exits(m5ctl):
 # ---------------------------------------------------------------------------
 
 async def test_cmd_run_timeout_expect_matched(m5ctl, monkeypatch, capsys):
-    """Event arrives before timeout — timed_out stays False, success branch executes."""
+    """Event arrives before timeout — timedout flag cleared, success branch executes."""
     _make_cmd_run_harness(m5ctl, monkeypatch, {
         "SHOW_MSG_WAIT inf M5 go": ["EVENT SCREEN MESSAGE", "EVENT BUTTON M5"],
     })
@@ -1231,7 +1275,7 @@ async def test_cmd_run_timeout_expect_matched(m5ctl, monkeypatch, capsys):
         "SHOW_MSG_WAIT inf M5 go",
         m5ctl._Expect("EVENT SCREEN MESSAGE", 1),
         m5ctl._Timeout(5.0, m5ctl._Expect("EVENT BUTTON M5", 2)),
-        m5ctl._IfTimedOut(lineno=3),
+        m5ctl._IfVar("timedout", False, lineno=3),
         m5ctl._Echo("timed_out_branch"),
         m5ctl._Else(lineno=4),
         m5ctl._Echo("success_branch"),
@@ -1244,7 +1288,7 @@ async def test_cmd_run_timeout_expect_matched(m5ctl, monkeypatch, capsys):
 
 
 async def test_cmd_run_timeout_expect_timed_out(m5ctl, monkeypatch, capsys):
-    """No event arrives — timed_out becomes True, timeout branch executes, no sys.exit."""
+    """No event arrives — timedout flag set, timeout branch executes, no sys.exit."""
     _make_cmd_run_harness(m5ctl, monkeypatch, {
         "SHOW_MSG_WAIT inf M5 go": ["EVENT SCREEN MESSAGE"],
     })
@@ -1252,7 +1296,7 @@ async def test_cmd_run_timeout_expect_timed_out(m5ctl, monkeypatch, capsys):
         "SHOW_MSG_WAIT inf M5 go",
         m5ctl._Expect("EVENT SCREEN MESSAGE", 1),
         m5ctl._Timeout(0.01, m5ctl._Expect("EVENT BUTTON M5", 2)),
-        m5ctl._IfTimedOut(lineno=3),
+        m5ctl._IfVar("timedout", False, lineno=3),
         m5ctl._Echo("timed_out_branch"),
         m5ctl._Else(lineno=4),
         m5ctl._Echo("success_branch"),
@@ -1265,14 +1309,14 @@ async def test_cmd_run_timeout_expect_timed_out(m5ctl, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# cmd_run — ! if_timed_out / ! else / ! endif branching
+# cmd_run — ! if / ! if_not / ! set / ! else / ! endif branching
 # ---------------------------------------------------------------------------
 
-async def test_cmd_run_if_timed_out_default_false(m5ctl, monkeypatch, capsys):
-    """Without a preceding ! timeout, timed_out defaults to False — if-block skipped."""
+async def test_cmd_run_if_unset_flag_skips_block(m5ctl, monkeypatch, capsys):
+    """! if unset_flag → if-block skipped, timed_out defaults to unset."""
     _make_cmd_run_harness(m5ctl, monkeypatch, {})
     items = [
-        m5ctl._IfTimedOut(lineno=1),
+        m5ctl._IfVar("timedout", False, lineno=1),
         m5ctl._Echo("timed_out_branch"),
         m5ctl._EndIf(lineno=2),
     ]
@@ -1280,11 +1324,11 @@ async def test_cmd_run_if_timed_out_default_false(m5ctl, monkeypatch, capsys):
     assert "timed_out_branch" not in capsys.readouterr().out
 
 
-async def test_cmd_run_if_else_default_false(m5ctl, monkeypatch, capsys):
-    """timed_out=False → else-block executes."""
+async def test_cmd_run_if_else_unset_runs_else(m5ctl, monkeypatch, capsys):
+    """! if unset_flag → else-block executes."""
     _make_cmd_run_harness(m5ctl, monkeypatch, {})
     items = [
-        m5ctl._IfTimedOut(lineno=1),
+        m5ctl._IfVar("timedout", False, lineno=1),
         m5ctl._Echo("timed_out_branch"),
         m5ctl._Else(lineno=2),
         m5ctl._Echo("success_branch"),
@@ -1294,3 +1338,71 @@ async def test_cmd_run_if_else_default_false(m5ctl, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "success_branch" in out
     assert "timed_out_branch" not in out
+
+
+async def test_cmd_run_set_then_if(m5ctl, monkeypatch, capsys):
+    """! set foo → ! if foo → if-block executes."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._SetVar("foo"),
+        m5ctl._IfVar("foo", False, lineno=1),
+        m5ctl._Echo("in_foo"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "in_foo" in capsys.readouterr().out
+
+
+async def test_cmd_run_if_not_unset(m5ctl, monkeypatch, capsys):
+    """! if_not foo (foo not set) → if-block executes."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._IfVar("foo", True, lineno=1),
+        m5ctl._Echo("not_set_branch"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "not_set_branch" in capsys.readouterr().out
+
+
+async def test_cmd_run_if_not_set(m5ctl, monkeypatch, capsys):
+    """! if_not foo (foo set via --set) → if-block skipped."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._IfVar("foo", True, lineno=1),
+        m5ctl._Echo("not_set_branch"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False,
+                        flags=frozenset({"foo"}))
+    assert "not_set_branch" not in capsys.readouterr().out
+
+
+async def test_cmd_run_flag_from_cli(m5ctl, monkeypatch, capsys):
+    """flags=frozenset({"noninteractive"}) → ! if noninteractive → block executes."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._IfVar("noninteractive", False, lineno=1),
+        m5ctl._Echo("skipping_interaction"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False,
+                        flags=frozenset({"noninteractive"}))
+    assert "skipping_interaction" in capsys.readouterr().out
+
+
+async def test_cmd_run_set_inside_skip_has_no_effect(m5ctl, monkeypatch, capsys):
+    """! set inside a skipped block must not affect flags_mutable."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        # skipped block that tries to set "foo"
+        m5ctl._IfVar("never", False, lineno=1),
+        m5ctl._SetVar("foo"),
+        m5ctl._EndIf(lineno=2),
+        # then check foo is not set
+        m5ctl._IfVar("foo", False, lineno=3),
+        m5ctl._Echo("foo_was_set"),
+        m5ctl._EndIf(lineno=4),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "foo_was_set" not in capsys.readouterr().out
