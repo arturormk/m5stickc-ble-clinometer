@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tools/demo.m5s`** — full-device demo script showcasing all `run` directives and major firmware features: connectivity check, screen navigation, live tilt readings, night mode, melody playback, button interaction, and tilt detection. Run with `uv run tools/m5ctl -p run tools/demo.m5s`.
 
 ### Fixed
+- **m5ctl `set-radec`** — negative declinations (e.g. `set-radec 06:45:09 -16:42:58`) were
+  rejected by argparse with `error: the following arguments are required: dec` because
+  argparse interprets any token starting with `-` that does not look like a bare number as
+  a flag. Fixed by adding a `~`-sentinel preprocessing step in `_preprocess_argv()` — the
+  same mechanism already used for `set-timezone` (negative UTC offsets) and `set-pitchroll`
+  (negative axis codes) — that rewrites a leading `-` in the DEC argument to `~` before
+  parsing and restores it in the dispatch handler before sending the BLE command.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
+- **m5ctl** — script files read by `exec`, `script`, and `run`, as well as the device
+  config file, were opened with `pathlib.Path.read_text()` without an explicit `encoding=`
+  argument. On Windows, Python falls back to the system ANSI code page (CP932 on Japanese
+  systems, CP1252 on Western systems), causing `UnicodeDecodeError` on any UTF-8 script
+  file. Fixed by passing `encoding="utf-8"` to all four `read_text()` call sites in the
+  tool.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+
 - **m5ctl `run`** — `! expect <prefix>` no longer times out when placed immediately after a plain BLE command. Previously the command handler always consumed the first device reply with `queue.get()`, leaving nothing for `! expect` to match — so `ping` / `! expect OK PONG` always timed out. The fix adds a look-ahead in `cmd_run`: when the next item in the expanded items list is an `_Expect`, the command handler skips its auto-consume and lets `! expect` drain the queue instead. The `! expect` loop already prints every notification it reads until the prefix matches, so multi-event flows (e.g. `show-msg … / ! expect EVENT SCREEN MESSAGE`) continue to work correctly.
 - **Build / M5StickC Plus 2** — `[env:m5stickc-plus2]` was missing
   `BOARD_HAS_PSRAM` and `-mfix-esp32-psram-cache-issue`. The Plus 2 ships

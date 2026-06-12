@@ -605,6 +605,34 @@ def test_handler_set_pitchroll_missing_comma_exits(m5ctl, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# set-radec command building
+# ---------------------------------------------------------------------------
+
+def test_handler_set_radec_positive_dec(m5ctl, monkeypatch):
+    """Positive DEC is passed through unchanged."""
+    assert _cmd(m5ctl, monkeypatch, "set-radec", "06:45:09", "+16:42:58") \
+        == "SET_RADEC 06:45:09 +16:42:58"
+
+
+def test_handler_set_radec_negative_dec(m5ctl, monkeypatch):
+    """Negative DEC is rewritten via ~ sentinel and restored correctly before sending."""
+    assert _cmd(m5ctl, monkeypatch, "set-radec", "06:45:09", "-16:42:58") \
+        == "SET_RADEC 06:45:09 -16:42:58"
+
+
+def test_handler_set_radec_zero_dec(m5ctl, monkeypatch):
+    """Unsigned zero DEC is passed through unchanged."""
+    assert _cmd(m5ctl, monkeypatch, "set-radec", "00:00:00", "00:00:00") \
+        == "SET_RADEC 00:00:00 00:00:00"
+
+
+def test_handler_set_radec_tilde_passthrough(m5ctl, monkeypatch):
+    """~ prefix supplied directly is translated to - before sending."""
+    assert _cmd(m5ctl, monkeypatch, "set-radec", "12:34:56", "~07:08:09") \
+        == "SET_RADEC 12:34:56 -07:08:09"
+
+
+# ---------------------------------------------------------------------------
 # _connect — retry logic (no real device required)
 # ---------------------------------------------------------------------------
 
