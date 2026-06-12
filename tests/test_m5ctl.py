@@ -1111,3 +1111,186 @@ async def test_cmd_run_command_followed_by_wait_still_consumed(m5ctl, monkeypatc
     items = ["PING", m5ctl._Wait(0.0)]
     await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
     assert "OK PONG" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# run command — timeout directive (parse-time)
+# ---------------------------------------------------------------------------
+
+def test_run_timeout_expect(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["! timeout 10 expect EVENT BUTTON M5"]), _make_script_args()
+    )
+    assert len(items) == 1
+    assert isinstance(items[0], m5ctl._Timeout)
+    assert items[0].max_wait == 10.0
+    assert isinstance(items[0].item, m5ctl._Expect)
+    assert items[0].item.prefix == "EVENT BUTTON M5"
+
+
+def test_run_timeout_wait_tilt(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["! timeout 10 wait_tilt 15"]), _make_script_args()
+    )
+    assert items == [m5ctl._Timeout(10.0, m5ctl._WaitTilt(15.0))]
+
+
+def test_run_timeout_wait_tilt_default_degrees(m5ctl):
+    items = m5ctl._expand_run_script(
+        _src(["! timeout 10 wait_tilt"]), _make_script_args()
+    )
+    assert items == [m5ctl._Timeout(10.0, m5ctl._WaitTilt(15.0))]
+
+
+def test_run_timeout_missing_directive_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! timeout 10"]), _make_script_args())
+
+
+def test_run_timeout_bad_seconds_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(
+            _src(["! timeout abc expect FOO"]), _make_script_args()
+        )
+
+
+def test_run_timeout_zero_seconds_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(
+            _src(["! timeout 0 expect FOO"]), _make_script_args()
+        )
+
+
+def test_run_timeout_unsupported_inner_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(
+            _src(["! timeout 10 wait 5"]), _make_script_args()
+        )
+
+
+def test_run_timeout_expect_no_prefix_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(
+            _src(["! timeout 10 expect"]), _make_script_args()
+        )
+
+
+# ---------------------------------------------------------------------------
+# run command — if_timed_out / else / endif (parse-time)
+# ---------------------------------------------------------------------------
+
+def test_run_if_timed_out_no_else(m5ctl):
+    src = _src(["! if_timed_out", "! echo a", "! endif"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items[0] == m5ctl._IfTimedOut(1)
+    assert items[1] == m5ctl._Echo("a")
+    assert items[2] == m5ctl._EndIf(3)
+
+
+def test_run_if_timed_out_with_else(m5ctl):
+    src = _src(["! if_timed_out", "! echo a", "! else", "! echo b", "! endif"])
+    items = m5ctl._expand_run_script(src, _make_script_args())
+    assert items[0] == m5ctl._IfTimedOut(1)
+    assert items[1] == m5ctl._Echo("a")
+    assert items[2] == m5ctl._Else(3)
+    assert items[3] == m5ctl._Echo("b")
+    assert items[4] == m5ctl._EndIf(5)
+
+
+def test_run_orphan_else_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! else"]), _make_script_args())
+
+
+def test_run_orphan_endif_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! endif"]), _make_script_args())
+
+
+def test_run_unclosed_if_timed_out_exits(m5ctl):
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(_src(["! if_timed_out", "! echo a"]), _make_script_args())
+
+
+def test_run_double_else_exits(m5ctl):
+    src = _src(["! if_timed_out", "! echo a", "! else", "! echo b", "! else", "! echo c", "! endif"])
+    with pytest.raises(SystemExit):
+        m5ctl._expand_run_script(src, _make_script_args())
+
+
+# ---------------------------------------------------------------------------
+# cmd_run — ! timeout runtime behaviour
+# ---------------------------------------------------------------------------
+
+async def test_cmd_run_timeout_expect_matched(m5ctl, monkeypatch, capsys):
+    """Event arrives before timeout — timed_out stays False, success branch executes."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {
+        "SHOW_MSG_WAIT inf M5 go": ["EVENT SCREEN MESSAGE", "EVENT BUTTON M5"],
+    })
+    items = [
+        "SHOW_MSG_WAIT inf M5 go",
+        m5ctl._Expect("EVENT SCREEN MESSAGE", 1),
+        m5ctl._Timeout(5.0, m5ctl._Expect("EVENT BUTTON M5", 2)),
+        m5ctl._IfTimedOut(lineno=3),
+        m5ctl._Echo("timed_out_branch"),
+        m5ctl._Else(lineno=4),
+        m5ctl._Echo("success_branch"),
+        m5ctl._EndIf(lineno=5),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    out = capsys.readouterr().out
+    assert "success_branch" in out
+    assert "timed_out_branch" not in out
+
+
+async def test_cmd_run_timeout_expect_timed_out(m5ctl, monkeypatch, capsys):
+    """No event arrives — timed_out becomes True, timeout branch executes, no sys.exit."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {
+        "SHOW_MSG_WAIT inf M5 go": ["EVENT SCREEN MESSAGE"],
+    })
+    items = [
+        "SHOW_MSG_WAIT inf M5 go",
+        m5ctl._Expect("EVENT SCREEN MESSAGE", 1),
+        m5ctl._Timeout(0.01, m5ctl._Expect("EVENT BUTTON M5", 2)),
+        m5ctl._IfTimedOut(lineno=3),
+        m5ctl._Echo("timed_out_branch"),
+        m5ctl._Else(lineno=4),
+        m5ctl._Echo("success_branch"),
+        m5ctl._EndIf(lineno=5),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    out = capsys.readouterr().out
+    assert "timed_out_branch" in out
+    assert "success_branch" not in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_run — ! if_timed_out / ! else / ! endif branching
+# ---------------------------------------------------------------------------
+
+async def test_cmd_run_if_timed_out_default_false(m5ctl, monkeypatch, capsys):
+    """Without a preceding ! timeout, timed_out defaults to False — if-block skipped."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._IfTimedOut(lineno=1),
+        m5ctl._Echo("timed_out_branch"),
+        m5ctl._EndIf(lineno=2),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    assert "timed_out_branch" not in capsys.readouterr().out
+
+
+async def test_cmd_run_if_else_default_false(m5ctl, monkeypatch, capsys):
+    """timed_out=False → else-block executes."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    items = [
+        m5ctl._IfTimedOut(lineno=1),
+        m5ctl._Echo("timed_out_branch"),
+        m5ctl._Else(lineno=2),
+        m5ctl._Echo("success_branch"),
+        m5ctl._EndIf(lineno=3),
+    ]
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
+    out = capsys.readouterr().out
+    assert "success_branch" in out
+    assert "timed_out_branch" not in out

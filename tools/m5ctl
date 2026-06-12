@@ -280,6 +280,76 @@ async def cmd_exec(address: str, lines: list[str], timeout: float, print_cmd: bo
                 sys.exit(1)
 
 
+async def _exec_expect(
+    prefix: str,
+    queue: "asyncio.Queue[str]",
+    timeout: float,
+) -> bool:
+    """Drain the notification queue until a message matching prefix arrives.
+
+    Returns True if matched, False if the timeout expired first.
+    """
+    while True:
+        try:
+            evt = await asyncio.wait_for(queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        print(evt)
+        if evt.startswith(prefix):
+            return True
+
+
+async def _exec_wait_tilt(
+    degrees: float,
+    client,
+    queue: "asyncio.Queue[str]",
+    per_read_timeout: float,
+    total_deadline: float,
+    print_cmd: bool,
+) -> bool:
+    """Poll GET_TILT until the delta from baseline reaches degrees, or the deadline passes.
+
+    per_read_timeout caps each individual BLE read.
+    total_deadline is an asyncio event-loop timestamp (float('inf') = no cap).
+    Returns True if the tilt threshold was reached, False if the deadline expired.
+    """
+    if print_cmd:
+        print(">>> GET_TILT (baseline)", file=sys.stderr)
+    await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
+    try:
+        resp = await asyncio.wait_for(queue.get(), timeout=per_read_timeout)
+    except asyncio.TimeoutError:
+        return False
+    print(resp)
+    try:
+        parts = resp.split()
+        pitch0, roll0 = float(parts[1]), float(parts[2])
+    except (IndexError, ValueError):
+        print(f"error: unexpected tilt response: {resp!r}", file=sys.stderr)
+        sys.exit(1)
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(0.2)
+        remaining = total_deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
+        try:
+            resp = await asyncio.wait_for(queue.get(), timeout=min(per_read_timeout, remaining))
+        except asyncio.TimeoutError:
+            return False
+        try:
+            parts = resp.split()
+            if parts[0] != "TILT":
+                continue
+            pitch, roll = float(parts[1]), float(parts[2])
+        except (IndexError, ValueError):
+            continue
+        if max(abs(pitch - pitch0), abs(roll - roll0)) >= degrees:
+            print(resp)
+            return True
+
+
 async def cmd_run(
     address: str,
     items: list,
@@ -294,7 +364,19 @@ async def cmd_run(
 
     async with _connect(address, CONNECT_TIMEOUT) as client:
         await _start_notify(client, RESP_UUID, on_notify)
+        timed_out: bool = False
+        skip: bool = False
         for idx, item in enumerate(items):
+            if isinstance(item, (_IfTimedOut, _Else, _EndIf)):
+                if isinstance(item, _IfTimedOut):
+                    skip = not timed_out
+                elif isinstance(item, _Else):
+                    skip = not skip
+                else:
+                    skip = False
+                continue
+            if skip:
+                continue
             if isinstance(item, _Wait):
                 await asyncio.sleep(item.seconds)
             elif isinstance(item, _AtTime):
@@ -310,52 +392,30 @@ async def cmd_run(
             elif isinstance(item, _Echo):
                 print(item.text)
             elif isinstance(item, _WaitTilt):
-                if print_cmd:
-                    print(">>> GET_TILT (baseline)", file=sys.stderr)
-                await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
-                try:
-                    resp = await asyncio.wait_for(queue.get(), timeout=timeout)
-                    print(resp)
-                except asyncio.TimeoutError:
-                    print(f"error: no tilt baseline response within {timeout}s", file=sys.stderr)
+                matched = await _exec_wait_tilt(
+                    item.degrees, client, queue, timeout, float("inf"), print_cmd
+                )
+                if not matched:
+                    print(f"error: wait_tilt timed out after {timeout}s", file=sys.stderr)
                     sys.exit(1)
-                try:
-                    parts = resp.split()
-                    pitch0, roll0 = float(parts[1]), float(parts[2])
-                except (IndexError, ValueError):
-                    print(f"error: unexpected tilt response: {resp!r}", file=sys.stderr)
-                    sys.exit(1)
-                while True:
-                    await asyncio.sleep(0.2)
-                    await client.write_gatt_char(CMD_UUID, b"GET_TILT", response=False)
-                    try:
-                        resp = await asyncio.wait_for(queue.get(), timeout=timeout)
-                    except asyncio.TimeoutError:
-                        print(f"error: no tilt response within {timeout}s", file=sys.stderr)
-                        sys.exit(1)
-                    try:
-                        parts = resp.split()
-                        if parts[0] != "TILT":
-                            continue
-                        pitch, roll = float(parts[1]), float(parts[2])
-                    except (IndexError, ValueError):
-                        continue
-                    if max(abs(pitch - pitch0), abs(roll - roll0)) >= item.degrees:
-                        print(resp)
-                        break
             elif isinstance(item, _Expect):
-                while True:
-                    try:
-                        evt = await asyncio.wait_for(queue.get(), timeout=timeout)
-                    except asyncio.TimeoutError:
-                        print(
-                            f"error: line {item.lineno}: '! expect {item.prefix}' timed out after {timeout}s",
-                            file=sys.stderr,
-                        )
-                        sys.exit(1)
-                    print(evt)
-                    if evt.startswith(item.prefix):
-                        break
+                matched = await _exec_expect(item.prefix, queue, timeout)
+                if not matched:
+                    print(
+                        f"error: line {item.lineno}: '! expect {item.prefix}' timed out after {timeout}s",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+            elif isinstance(item, _Timeout):
+                loop = asyncio.get_event_loop()
+                deadline = loop.time() + item.max_wait
+                if isinstance(item.item, _Expect):
+                    matched = await _exec_expect(item.item.prefix, queue, item.max_wait)
+                else:  # _WaitTilt
+                    matched = await _exec_wait_tilt(
+                        item.item.degrees, client, queue, timeout, deadline, print_cmd
+                    )
+                timed_out = not matched
             elif isinstance(item, _Exit):
                 break
             else:
@@ -521,6 +581,23 @@ class _Exit(NamedTuple):
 class _Expect(NamedTuple):
     prefix: str   # wait for a notification that starts with this text
     lineno: int   # source line number, for error reporting
+
+
+class _Timeout(NamedTuple):
+    max_wait: float   # wall-clock cap in seconds
+    item: object      # _Expect | _WaitTilt — the wrapped directive
+
+
+class _IfTimedOut(NamedTuple):
+    lineno: int
+
+
+class _Else(NamedTuple):
+    lineno: int
+
+
+class _EndIf(NamedTuple):
+    lineno: int
 
 
 def do_send(args, command: str) -> None:
@@ -691,7 +768,7 @@ examples:
   m5ctl help               # list all accepted BLE commands
   m5ctl script setup.m5s   # run m5ctl commands from a file over one BLE connection
   m5ctl script -           # read m5ctl commands from stdin
-  m5ctl run sequence.m5r   # run a timed script with ! wait / ! at / ! for directives
+  m5ctl run sequence.m5r   # run a timed script with ! wait / ! at / ! for / ! expect directives
   m5ctl run -              # read timed script from stdin
     """,
 )
@@ -755,7 +832,7 @@ p.add_argument("file", metavar="FILE",
 p = sub.add_parser("script",  help="Run m5ctl commands from a file over one BLE connection")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands, one per line (use - for stdin)")
-p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo)")
+p = sub.add_parser("run",     help="Execute a timed script with ! directives (wait/at/for/echo/expect/timeout/if_timed_out)")
 p.add_argument("file", metavar="FILE",
                help="script file with m5ctl commands and ! directives, one per line (use - for stdin)")
 sub.add_parser("terminal", aliases=["term"],
@@ -964,6 +1041,8 @@ def _expand_run_script(
     result = []
     i = _start
     end = len(source) if _end is None else _end
+    if_depth = 0
+    seen_else_depths: set[int] = set()
 
     while i < end:
         lineno, line = source[i]
@@ -1055,6 +1134,67 @@ def _expand_run_script(
                 result.append(_WaitTilt(degrees))
                 i += 1
 
+            elif directive == "timeout":
+                parts = rest.split(None, 2)
+                if len(parts) < 2:
+                    print(f"error: line {lineno}: '! timeout' expects <seconds> <directive> [args]", file=sys.stderr)
+                    sys.exit(1)
+                try:
+                    max_wait = float(parts[0])
+                    if max_wait <= 0:
+                        raise ValueError
+                except ValueError:
+                    print(f"error: line {lineno}: '! timeout' expects a positive number, got {parts[0]!r}", file=sys.stderr)
+                    sys.exit(1)
+                inner_dir = parts[1].lower()
+                inner_rest = parts[2] if len(parts) > 2 else ""
+                if inner_dir == "expect":
+                    if not inner_rest:
+                        print(f"error: line {lineno}: '! timeout ... expect' requires a prefix", file=sys.stderr)
+                        sys.exit(1)
+                    inner_item = _Expect(inner_rest, lineno)
+                elif inner_dir == "wait_tilt":
+                    inner_degrees = 15.0
+                    if inner_rest:
+                        try:
+                            inner_degrees = float(inner_rest)
+                            if inner_degrees <= 0:
+                                raise ValueError
+                        except ValueError:
+                            print(f"error: line {lineno}: '! timeout ... wait_tilt' expects a positive number, got {inner_rest!r}", file=sys.stderr)
+                            sys.exit(1)
+                    inner_item = _WaitTilt(inner_degrees)
+                else:
+                    print(f"error: line {lineno}: '! timeout' does not support '! {inner_dir}'", file=sys.stderr)
+                    sys.exit(1)
+                result.append(_Timeout(max_wait, inner_item))
+                i += 1
+
+            elif directive == "if_timed_out":
+                if_depth += 1
+                result.append(_IfTimedOut(lineno))
+                i += 1
+
+            elif directive == "else":
+                if if_depth == 0:
+                    print(f"error: line {lineno}: '! else' without matching '! if_timed_out'", file=sys.stderr)
+                    sys.exit(1)
+                if if_depth in seen_else_depths:
+                    print(f"error: line {lineno}: duplicate '! else' in '! if_timed_out' block", file=sys.stderr)
+                    sys.exit(1)
+                seen_else_depths.add(if_depth)
+                result.append(_Else(lineno))
+                i += 1
+
+            elif directive == "endif":
+                if if_depth == 0:
+                    print(f"error: line {lineno}: '! endif' without matching '! if_timed_out'", file=sys.stderr)
+                    sys.exit(1)
+                seen_else_depths.discard(if_depth)
+                if_depth -= 1
+                result.append(_EndIf(lineno))
+                i += 1
+
             else:
                 print(f"error: line {lineno}: unknown directive '! {directive}'", file=sys.stderr)
                 sys.exit(1)
@@ -1080,6 +1220,14 @@ def _expand_run_script(
             if ble_cmd is not None:
                 result.append(ble_cmd)
             i += 1
+
+    if if_depth != 0:
+        # Find the last unclosed if_timed_out lineno from the emitted markers
+        for item in reversed(result):
+            if isinstance(item, _IfTimedOut):
+                print(f"error: line {item.lineno}: '! if_timed_out' has no matching '! endif'", file=sys.stderr)
+                break
+        sys.exit(1)
 
     return result
 
