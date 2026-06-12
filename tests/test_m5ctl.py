@@ -1406,3 +1406,50 @@ async def test_cmd_run_set_inside_skip_has_no_effect(m5ctl, monkeypatch, capsys)
     ]
     await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", items, timeout=5.0, print_cmd=False)
     assert "foo_was_set" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# cmd_run — nested ! if runtime (depth-aware skip)
+# ---------------------------------------------------------------------------
+
+def _nested_items(m5ctl):
+    """Outer ! if_not noninteractive containing inner ! if timedout / ! else / ! endif."""
+    return [
+        m5ctl._IfVar("noninteractive", True, lineno=1),   # if_not noninteractive
+        m5ctl._IfVar("timedout", False, lineno=2),         # if timedout
+        m5ctl._Echo("timeout_branch"),
+        m5ctl._Else(lineno=3),
+        m5ctl._Echo("success_branch"),
+        m5ctl._EndIf(lineno=4),
+        m5ctl._EndIf(lineno=5),
+    ]
+
+
+async def test_cmd_run_nested_outer_skip_suppresses_inner_else(m5ctl, monkeypatch, capsys):
+    """Outer block skipped (noninteractive set) — inner ! else must NOT un-skip."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", _nested_items(m5ctl), timeout=5.0,
+                        print_cmd=False, flags=frozenset({"noninteractive"}))
+    out = capsys.readouterr().out
+    assert "timeout_branch" not in out
+    assert "success_branch" not in out
+
+
+async def test_cmd_run_nested_outer_executes_inner_else_branch(m5ctl, monkeypatch, capsys):
+    """Outer block runs (noninteractive not set), timedout not set → else branch runs."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", _nested_items(m5ctl), timeout=5.0,
+                        print_cmd=False, flags=frozenset())
+    out = capsys.readouterr().out
+    assert "timeout_branch" not in out
+    assert "success_branch" in out
+
+
+async def test_cmd_run_nested_outer_executes_inner_if_branch(m5ctl, monkeypatch, capsys):
+    """Outer block runs (noninteractive not set), timedout set → if branch runs."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {})
+    await m5ctl.cmd_run("AA:BB:CC:DD:EE:FF", _nested_items(m5ctl), timeout=5.0,
+                        print_cmd=False, flags=frozenset({"timedout"}))
+    out = capsys.readouterr().out
+    assert "timeout_branch" in out
+    assert "success_branch" not in out

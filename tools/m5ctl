@@ -367,14 +367,27 @@ async def cmd_run(
         await _start_notify(client, RESP_UUID, on_notify)
         flags_mutable: set[str] = set(flags)
         skip: bool = False
+        skip_level: int = 0    # nesting depth at which the current skip began
+        current_depth: int = 0  # current if-nesting depth
         for idx, item in enumerate(items):
             if isinstance(item, (_IfVar, _Else, _EndIf)):
                 if isinstance(item, _IfVar):
-                    skip = (item.name in flags_mutable) == item.negated
+                    current_depth += 1
+                    if not skip:
+                        is_set = item.name in flags_mutable
+                        if is_set == item.negated:  # condition false → skip block
+                            skip = True
+                            skip_level = current_depth
                 elif isinstance(item, _Else):
-                    skip = not skip
-                else:
-                    skip = False
+                    if skip and skip_level == current_depth:
+                        skip = False  # our own else: un-skip
+                    elif not skip:
+                        skip = True   # entering the else branch: skip it
+                        skip_level = current_depth
+                else:  # _EndIf
+                    if skip and skip_level == current_depth:
+                        skip = False  # leaving the block that started the skip
+                    current_depth -= 1
                 continue
             if skip:
                 continue
