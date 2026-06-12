@@ -133,6 +133,15 @@ auto-stamps the build number in `src/version.h`:
 The hook increments `FW_VERSION` from `"MAJOR.MINOR"` to `"MAJOR.MINOR.NNN"` on
 every commit, where NNN is the total commit count. It is safe to re-run.
 
+#### Version numbering
+
+- **Odd minor** (e.g. `1.3`) — development branch. The patch number is the
+  running total commit count, auto-stamped by the hook on every commit. It does
+  not reset when the minor version changes, but does reset to 0 when the major
+  version changes.
+- **Even minor** (e.g. `1.2`) — release branch. The hook is skipped; the patch
+  number is set manually and incremented only for bug-fix releases.
+
 ## Screens
 
 The **M5 front button** cycles through screens in order:

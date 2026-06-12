@@ -684,6 +684,8 @@ examples:
   m5ctl help               # list all accepted BLE commands
   m5ctl script setup.m5s   # run m5ctl commands from a file over one BLE connection
   m5ctl script -           # read m5ctl commands from stdin
+  m5ctl run sequence.m5r   # run a timed script with ! wait / ! at / ! for directives
+  m5ctl run -              # read timed script from stdin
     """,
 )
 parser.add_argument(
