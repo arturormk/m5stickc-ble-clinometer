@@ -232,6 +232,8 @@ beep C4 E4 G4 C'4 G4 E4 C4
 # 6 — Button interaction
 # ---------------------------------------------------------------------------
 
+! if_not noninteractive
+
 ! echo 
 ! echo -- Button demo: press M5 on the device to continue --
 ! echo
@@ -251,10 +253,13 @@ beep G8 E4
 
 ! wait 2
 
+! endif
 
 # ---------------------------------------------------------------------------
 # 7 — Tilt interaction
 # ---------------------------------------------------------------------------
+
+! if_not noninteractive
 
 ! echo 
 ! echo -- Tilt demo: tilt the device more than 15 degrees --
@@ -275,6 +280,7 @@ beep E8 G4
 
 ! wait 1
 
+! endif
 
 # ---------------------------------------------------------------------------
 # 8 — Axes
