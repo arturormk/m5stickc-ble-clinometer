@@ -737,65 +737,75 @@ def _preprocess_argv(argv: list[str]) -> list[str]:
 # Parser (module-level so cmd_script can reuse it for per-line parsing)
 # ---------------------------------------------------------------------------
 
+_EXAMPLES: list[tuple[str, str | None]] = [
+    ("m5ctl version", None),
+    ("m5ctl list", "show configured devices with reachability (1-second scan)"),
+    ("m5ctl scan", "discover all nearby BLE devices"),
+    ("m5ctl -d main tilt", "select device by config name (device.main = MAC in conf)"),
+    ("m5ctl -d 0 tilt", "select by numeric config key (device.0 = MAC)"),
+    ("m5ctl tilt", "pitch, roll in degrees, gravity magnitude in g"),
+    ("m5ctl get-board", "show board type (e.g. M5StickCPlus2, M5StackCore2)"),
+    ("m5ctl calibrate", "zero at current orientation; prints ref vector"),
+    ("m5ctl calibrate +0.0023 -0.0150 +0.9999", "restore a previously saved calibration"),
+    ("m5ctl calibrate-reset", "restore hardware reference"),
+    ("m5ctl status", None),
+    ("m5ctl set-time-now", "sync from host clock (embeds UTC offset)"),
+    ("m5ctl set-time-now --utc", "force UTC"),
+    ("m5ctl set-time-now --timezone CEST", "use named timezone"),
+    ("m5ctl set-time-now --timezone Europe/Madrid", None),
+    ('m5ctl set-time "2026-05-14T12:30:00+01:00"', None),
+    ("m5ctl set-timezone JST", "resolves to +09:00, label JST"),
+    ("m5ctl set-timezone CET", "resolves to +01:00, label CET"),
+    ("m5ctl set-timezone Europe/Madrid", "resolves current offset, label Europe/Madrid"),
+    ("m5ctl set-timezone +09:00 JST", "explicit offset with label"),
+    ("m5ctl set-timezone ~05:00 EST", "negative offset (~ avoids argparse flag conflict)"),
+    ("m5ctl set-timezone LST", "switch to sidereal (needs set-longitude first)"),
+    ("m5ctl set-longitude 135.5", "set observer longitude (Osaka)"),
+    ('m5ctl set-radec "12:34:56" "+07:08:09"', None),
+    ('m5ctl set-altaz "+43.2" "181.7"', None),
+    ('m5ctl show-msg 5 "Moving altitude axis"', None),
+    ('m5ctl show-msg inf "Waiting for user"', None),
+    ('m5ctl show-msg-wait 30 M5 "Press M5 when ready"', None),
+    ("m5ctl cancel-msg", None),
+    ("m5ctl listen --stream 500", "stream tilt every 500 ms and print notifications"),
+    ("m5ctl night-mode on", "enable red-only night mode"),
+    ("m5ctl night-mode off", "restore normal colors"),
+    ("m5ctl get-pitchroll", "show current pitch/roll axis assignment"),
+    ("m5ctl set-pitchroll +X,+Y", "default: pitch=+X (top rises), roll=+Y (right backward rises)"),
+    ("m5ctl set-pitchroll ~X,+Y", "pitch=-X  (use ~ for negative to avoid argparse flag conflicts)"),
+    ("m5ctl set-pitchroll +X,-Y", "flip roll sign"),
+    ("m5ctl beep", "standard attention beep (880 Hz, 200 ms)"),
+    ("m5ctl beep \"C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2\"", "play a melody"),
+    ("m5ctl set-screen BATTERY", "navigate to battery screen"),
+    ("m5ctl set-screen SYSINFO-2", "navigate to STACK sub-page"),
+    ("m5ctl persist", "save current tz, longitude, calibration and pitchroll to NVS"),
+    ("m5ctl persist-read", "show stored NVS values (valid flag + all keys)"),
+    ("m5ctl persist-clear", "invalidate stored values (1 NVS write, data kept)"),
+    ("m5ctl persist-restore", "re-enable and apply last stored values in-session"),
+    ("m5ctl reboot", "software-reset the device"),
+    ("m5ctl listen", "print all notifications (events, screen changes…)"),
+    ("m5ctl terminal", "interactive BLE terminal (persistent session, live notifications)"),
+    ("m5ctl help", "list all accepted BLE commands"),
+    ("m5ctl script setup.m5s", "run m5ctl commands from a file over one BLE connection"),
+    ("m5ctl script -", "read m5ctl commands from stdin"),
+    ("m5ctl run sequence.m5r", "run a timed script with ! wait / ! at / ! for / ! expect directives"),
+    ("m5ctl run -", "read timed script from stdin"),
+]
+
+
+def _epilog_examples() -> str:
+    w = max(len(cmd) for cmd, c in _EXAMPLES if c is not None)
+    lines = ["examples:"]
+    for cmd, c in _EXAMPLES:
+        lines.append(f"  {cmd:<{w}}  # {c}" if c is not None else f"  {cmd}")
+    return "\n" + "\n".join(lines) + "\n"
+
+
 parser = argparse.ArgumentParser(
     prog="m5ctl",
     description="Control the M5StickC NexStar clinometer over BLE.",
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    epilog="""
-examples:
-  m5ctl version
-  m5ctl list                # show configured devices with reachability (1-second scan)
-  m5ctl scan                # discover all nearby BLE devices
-  m5ctl -d main tilt        # select device by config name (device.main = MAC in conf)
-  m5ctl -d 0 tilt           # select by numeric config key (device.0 = MAC)
-  m5ctl tilt                # pitch, roll in degrees, gravity magnitude in g
-  m5ctl get-board           # show board type (e.g. M5StickCPlus2, M5StackCore2)
-  m5ctl calibrate                             # zero at current orientation; prints ref vector
-  m5ctl calibrate +0.0023 -0.0150 +0.9999   # restore a previously saved calibration
-  m5ctl calibrate-reset                       # restore hardware reference
-  m5ctl status
-  m5ctl set-time-now                    # sync from host clock (embeds UTC offset)
-  m5ctl set-time-now --utc             # force UTC
-  m5ctl set-time-now --timezone CEST   # use named timezone
-  m5ctl set-time-now --timezone Europe/Madrid
-  m5ctl set-time "2026-05-14T12:30:00+01:00"
-  m5ctl set-timezone JST               # resolves to +09:00, label JST
-  m5ctl set-timezone CET               # resolves to +01:00, label CET
-  m5ctl set-timezone Europe/Madrid     # resolves current offset, label Europe/Madrid
-  m5ctl set-timezone +09:00 JST        # explicit offset with label
-  m5ctl set-timezone ~05:00 EST        # negative offset (~ avoids argparse flag conflict)
-  m5ctl set-timezone LST               # switch to sidereal (needs set-longitude first)
-  m5ctl set-longitude 135.5            # set observer longitude (Osaka)
-  m5ctl set-radec "12:34:56" "+07:08:09"
-  m5ctl set-altaz "+43.2" "181.7"
-  m5ctl show-msg 5 "Moving altitude axis"
-  m5ctl show-msg inf "Waiting for user"
-  m5ctl show-msg-wait 30 M5 "Press M5 when ready"
-  m5ctl cancel-msg
-  m5ctl listen --stream 500   # stream tilt every 500 ms and print notifications
-  m5ctl night-mode on      # enable red-only night mode
-  m5ctl night-mode off     # restore normal colors
-  m5ctl get-pitchroll                   # show current pitch/roll axis assignment
-  m5ctl set-pitchroll +X,+Y            # default: pitch=+X (top rises), roll=+Y (right backward rises)
-  m5ctl set-pitchroll ~X,+Y            # pitch=-X  (use ~ for negative to avoid argparse flag conflicts)
-  m5ctl set-pitchroll +X,-Y            # flip roll sign
-  m5ctl beep               # standard attention beep (880 Hz, 200 ms)
-  m5ctl beep "C4 E4 G4 C'2 -4 C'8 B8 A8 G8 C2"  # play a melody
-  m5ctl set-screen BATTERY       # navigate to battery screen
-  m5ctl set-screen SYSINFO-2     # navigate to STACK sub-page
-  m5ctl persist            # save current tz, longitude, calibration and pitchroll to NVS
-  m5ctl persist-read       # show stored NVS values (valid flag + all keys)
-  m5ctl persist-clear      # invalidate stored values (1 NVS write, data kept)
-  m5ctl persist-restore    # re-enable and apply last stored values in-session
-  m5ctl reboot             # software-reset the device
-  m5ctl listen             # print all notifications (events, screen changes…)
-  m5ctl terminal           # interactive BLE terminal (persistent session, live notifications)
-  m5ctl help               # list all accepted BLE commands
-  m5ctl script setup.m5s   # run m5ctl commands from a file over one BLE connection
-  m5ctl script -           # read m5ctl commands from stdin
-  m5ctl run sequence.m5r   # run a timed script with ! wait / ! at / ! for / ! expect directives
-  m5ctl run -              # read timed script from stdin
-    """,
+    epilog=_epilog_examples(),
 )
 parser.add_argument(
     "-d", "--device",
