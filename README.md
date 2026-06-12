@@ -1114,7 +1114,7 @@ options:
 | `reboot` | | Software-reset the device |
 | `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
 | `script` | `FILE` | Run m5ctl commands from a file or stdin (`-`), one per line; each line is parsed as m5ctl arguments (`set-time-now --timezone CEST`, `beep C4`, …); blank lines and `#` comments are ignored |
-| `run` | `FILE` | Like `script` but executes commands sequentially and supports `! directive` lines for timing, looping, interaction, and reply validation (see below) |
+| `run` | `[--set NAME] FILE` | Like `script` but executes commands sequentially and supports `! directive` lines for timing, looping, interaction, reply validation, and conditional execution (see below) |
 | `terminal` | | Open an interactive BLE terminal over a persistent connection; accepts m5ctl commands or raw BLE strings; all notifications print live; `exit` or Ctrl+D to quit (alias: `term`) |
 
 Examples:
@@ -1165,8 +1165,9 @@ uv run tools/m5ctl exec commands.txt     # send commands from a file
 printf 'PING\nGET_TILT\n' | uv run tools/m5ctl exec -   # send from stdin
 uv run tools/m5ctl script setup.m5s     # run m5ctl commands from a script file
 echo 'set-time-now --timezone CEST' | uv run tools/m5ctl script -   # from stdin
-uv run tools/m5ctl run sequence.m5s              # timed script with ! directives
-uv run tools/m5ctl -p run tools/demo.m5s         # full demo (BLE commands echoed to stderr)
+uv run tools/m5ctl run sequence.m5s                        # timed script with ! directives
+uv run tools/m5ctl run --set noninteractive demo.m5s       # pre-set a flag before the script starts
+uv run tools/m5ctl -p run tools/demo.m5s                   # full demo (BLE commands echoed to stderr)
 uv run tools/m5ctl terminal                       # interactive BLE terminal
 uv run tools/m5ctl term                           # alias for terminal
 ```
@@ -1403,9 +1404,10 @@ persist
 `run` extends `script` with sequential execution and `! directive` lines for timing, looping, interaction, and reply validation. Unlike `script` (which batches commands and sends them all at once), `run` keeps a single BLE connection open and sends each command immediately, inserting sleeps, loops, and event waits as it goes.
 
 ```bash
-uv run tools/m5ctl run sequence.m5s          # execute a timed script
-uv run tools/m5ctl -p run tools/demo.m5s     # run the full demo (echoes BLE commands to stderr)
-uv run tools/m5ctl run -                     # read from stdin until EOF
+uv run tools/m5ctl run sequence.m5s              # execute a timed script
+uv run tools/m5ctl -p run tools/demo.m5s         # run the full demo (echoes BLE commands to stderr)
+uv run tools/m5ctl run -                         # read from stdin until EOF
+uv run tools/m5ctl run --set noninteractive demo.m5s  # pre-set a flag before the script starts
 ```
 
 #### Directives
@@ -1422,8 +1424,18 @@ Lines whose first non-whitespace character sequence is `!` are interpreted as di
 | `! expect <prefix>` | Wait for an incoming BLE notification whose text starts with `prefix`; every notification read while waiting is printed. Use it to validate a command's reply (`! expect OK PONG`) or to wait for an async event (`! expect EVENT SCREEN CLINOMETER`). Fails with a timeout error if no matching notification arrives within `--timeout` seconds. When placed immediately after a BLE command, the command's reply is not consumed automatically — `! expect` handles it. |
 | `! wait_tilt [<degrees>]` | Block until the device tilts more than `<degrees>` from its baseline orientation at the start of the wait (default 15°). |
 | `! exit` | Stop script execution immediately; remaining lines are not processed. |
+| `! timeout <secs> <directive>` | Wrap a `! expect` or `! wait_tilt` with a wall-clock deadline. If the inner directive completes before `<secs>` seconds elapse, execution continues normally and the reserved flag `timedout` is cleared. If the deadline expires first, execution continues silently (no error, no exit) and `timedout` is set. Combines with `! if timedout` / `! else` / `! endif` to branch on whether the user interacted. |
+| `! if <name>` | Begin a conditional block. The block executes if the named flag is set; otherwise it is skipped. |
+| `! if_not <name>` | Begin a conditional block. The block executes if the named flag is **not** set; otherwise it is skipped. |
+| `! else` | Flip the active branch inside a `! if` / `! if_not` block. |
+| `! endif` | Close the innermost `! if` / `! if_not` block. |
+| `! set <name>` | Set a named flag. Has no effect when inside a skipped block. |
 
-`! for` / `! endfor` blocks can be nested to any depth. Blank lines and `#` comments are stripped as usual.
+Flags are script-global boolean variables. A flag is either set or unset; `! if` / `! if_not` tests the current state at runtime. The reserved flag `timedout` is written automatically by `! timeout`. Flags can also be pre-set from the command line with `--set NAME` (repeatable) before the script starts — for example `--set noninteractive` lets the script detect that it is running unattended.
+
+Identifiers must match `[a-zA-Z_][a-zA-Z0-9_]*`.
+
+`! for` / `! endfor` blocks can be nested to any depth. `! if` / `! endif` blocks cannot be nested in this version. Blank lines and `#` comments are stripped as usual.
 
 #### Example — demo/video sequence
 
@@ -1475,24 +1487,62 @@ show-msg 2 Sequence starting
 
 Button waits are expressed with `show-msg-wait` + `! expect`. `cancel-msg` dismisses the message; because `cancel-msg` is immediately followed by `! expect EVENT SCREEN`, the command's `OK MSG_CANCEL` reply is also handled by the `! expect` loop, leaving the queue clean for the next command.
 
+Use `! timeout` to give the user a window to interact while keeping the script unblocking if they don't. The reserved flag `timedout` records whether the deadline expired, and `! if timedout` / `! else` / `! endif` branches accordingly:
+
 ```
-! echo Press M5 on the device to begin
+! echo Press M5 on the device (or wait 10 s to continue automatically)
 show-msg-wait inf M5 Press M5 to continue
 ! expect EVENT SCREEN MESSAGE
-! expect EVENT BUTTON M5
+! timeout 10 expect EVENT BUTTON M5
 cancel-msg
-! expect EVENT SCREEN
-beep G8 E4
+! expect EVENT SCREEN CLINOMETER
+! if timedout
+  ! echo (continuing automatically)
+! else
+  ! echo Button pressed — moving on.
+  beep G8 E4
+  ! expect OK BEEP
+! endif
 
-! echo Now tilt the device more than 20 degrees
+! echo Tilt the device more than 15 degrees (or wait 10 s)
 show-msg inf Tilt me!
 ! expect EVENT SCREEN MESSAGE
-! wait_tilt 20
+! timeout 10 wait_tilt 15
 cancel-msg
-! expect EVENT SCREEN
-! echo Tilt detected
-beep E8 G4
+! expect EVENT SCREEN CLINOMETER
+! if timedout
+  ! echo (no tilt detected — continuing)
+! else
+  ! echo Tilt detected — nice work!
+  beep E8 G4
+  ! expect OK BEEP
+! endif
 ```
+
+To skip interaction entirely when running unattended, gate the whole section behind a flag:
+
+```
+! if_not noninteractive
+  show-msg-wait inf M5 Press M5 to continue
+  ! expect EVENT SCREEN MESSAGE
+  ! timeout 10 expect EVENT BUTTON M5
+  cancel-msg
+  ! expect EVENT SCREEN CLINOMETER
+  ! if timedout
+    ! echo (auto-continuing)
+  ! else
+    beep G8 E4
+    ! expect OK BEEP
+  ! endif
+! endif
+```
+
+```bash
+uv run tools/m5ctl run demo.m5s                    # interactive (default)
+uv run tools/m5ctl run --set noninteractive demo.m5s  # skip interaction sections
+```
+
+For a blocking (fatal-on-timeout) button wait — when you want the script to abort if the user never presses — use plain `! expect EVENT BUTTON M5` without `! timeout`.
 
 #### Example — observatory setup at a precise time
 
@@ -1527,6 +1577,9 @@ The `-p` flag echoes each BLE command to stderr as it is sent, which is useful f
 | Console output | None | `! echo` |
 | Reply validation | None | `! expect` |
 | Tilt wait | None | `! wait_tilt` |
+| Timed interaction | None | `! timeout <secs> <directive>` |
+| Conditionals | None | `! if <name>` / `! if_not <name>` / `! else` / `! endif` |
+| Script flags | None | `! set <name>` · `--set NAME` |
 | Early exit | None | `! exit` |
 | Best for | Setup scripts (fast, minimal connect time) | Demos, video narration, timed automation |
 
