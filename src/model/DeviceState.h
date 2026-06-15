@@ -80,6 +80,8 @@ struct DeviceState {
     uint32_t lastStreamMs;
 
     bool     nightMode;
+    bool     autodimEnabled      = true;
+    uint8_t  manualBrightnessVal = 128;  // used when autodimEnabled == false
     uint32_t lastBleCommandMs;  // millis() of last BLE command or connection
     uint32_t lastCalibrateMs;   // millis() of last CALIBRATE or CALIBRATE_RESET
 

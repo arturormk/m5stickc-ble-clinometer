@@ -605,6 +605,59 @@ def test_handler_set_pitchroll_missing_comma_exits(m5ctl, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# set-bright command building
+# ---------------------------------------------------------------------------
+
+def test_handler_set_bright_numeric(m5ctl, monkeypatch):
+    """A numeric level is sent as SET_BRIGHT <n>."""
+    assert _cmd(m5ctl, monkeypatch, "set-bright", "128") == "SET_BRIGHT 128"
+
+
+def test_handler_set_bright_zero(m5ctl, monkeypatch):
+    """Zero is a valid brightness level."""
+    assert _cmd(m5ctl, monkeypatch, "set-bright", "0") == "SET_BRIGHT 0"
+
+
+def test_handler_set_bright_max(m5ctl, monkeypatch):
+    """255 is the maximum valid brightness level."""
+    assert _cmd(m5ctl, monkeypatch, "set-bright", "255") == "SET_BRIGHT 255"
+
+
+def test_handler_set_bright_auto(m5ctl, monkeypatch):
+    """'auto' re-enables autodim."""
+    assert _cmd(m5ctl, monkeypatch, "set-bright", "auto") == "SET_BRIGHT AUTO"
+
+
+def test_handler_set_bright_auto_case_insensitive(m5ctl, monkeypatch):
+    """'AUTO' (uppercase) also re-enables autodim."""
+    assert _cmd(m5ctl, monkeypatch, "set-bright", "AUTO") == "SET_BRIGHT AUTO"
+
+
+def test_handler_set_bright_out_of_range_exits(m5ctl, monkeypatch):
+    """A value > 255 exits with an error."""
+    with pytest.raises(SystemExit):
+        _cmd(m5ctl, monkeypatch, "set-bright", "256")
+
+
+def test_handler_set_bright_negative_exits(m5ctl, monkeypatch):
+    """A negative value exits with an error."""
+    with pytest.raises(SystemExit):
+        _cmd(m5ctl, monkeypatch, "set-bright", "-1")
+
+
+def test_handler_set_bright_non_numeric_exits(m5ctl, monkeypatch):
+    """A non-numeric, non-'auto' value exits with an error."""
+    with pytest.raises(SystemExit):
+        _cmd(m5ctl, monkeypatch, "set-bright", "bright")
+
+
+def test_terminal_ble_set_bright(m5ctl):
+    """set-bright passes through to the terminal BLE translator."""
+    assert _ble(m5ctl, "set-bright 64") == "SET_BRIGHT 64"
+    assert _ble(m5ctl, "set-bright auto") == "SET_BRIGHT AUTO"
+
+
+# ---------------------------------------------------------------------------
 # set-radec command building
 # ---------------------------------------------------------------------------
 

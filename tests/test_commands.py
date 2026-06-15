@@ -94,6 +94,7 @@ async def test_get_status_fields(device_addr):
     assert "STREAM=" in resp
     assert "BAT=" in resp
     assert "NIGHT=" in resp
+    assert "BRIGHT=" in resp
     assert "FW=" in resp
 
 
@@ -1011,6 +1012,74 @@ async def test_night_mode_reflected_in_status(device_addr):
 async def test_night_mode_bad_arg(device_addr):
     async with BleSession(device_addr) as s:
         resp = await s.send("SET_NIGHT_MODE MAYBE")
+    assert resp == "ERR BAD_ARGS"
+
+
+# ---------------------------------------------------------------------------
+# SET_BRIGHT
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_bright_numeric(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT 64")
+        assert resp == "OK BRIGHT 64"
+        await s.send("SET_BRIGHT AUTO")
+
+
+@pytest.mark.asyncio
+async def test_set_bright_zero(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT 0")
+        assert resp == "OK BRIGHT 0"
+        await s.send("SET_BRIGHT AUTO")
+
+
+@pytest.mark.asyncio
+async def test_set_bright_max(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT 255")
+        assert resp == "OK BRIGHT 255"
+        await s.send("SET_BRIGHT AUTO")
+
+
+@pytest.mark.asyncio
+async def test_set_bright_auto(device_addr):
+    async with BleSession(device_addr) as s:
+        await s.send("SET_BRIGHT 32")
+        resp = await s.send("SET_BRIGHT AUTO")
+        assert resp == "OK BRIGHT AUTO"
+
+
+@pytest.mark.asyncio
+async def test_set_bright_reflected_in_status(device_addr):
+    async with BleSession(device_addr) as s:
+        await s.send("SET_BRIGHT 32")
+        status = await s.send("GET_STATUS")
+        assert "BRIGHT=32" in status
+        await s.send("SET_BRIGHT AUTO")
+        status = await s.send("GET_STATUS")
+        assert "BRIGHT=AUTO" in status
+
+
+@pytest.mark.asyncio
+async def test_set_bright_out_of_range(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT 256")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_bright_bad_arg(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT MAYBE")
+    assert resp == "ERR BAD_ARGS"
+
+
+@pytest.mark.asyncio
+async def test_set_bright_no_arg(device_addr):
+    async with BleSession(device_addr) as s:
+        resp = await s.send("SET_BRIGHT")
     assert resp == "ERR BAD_ARGS"
 
 

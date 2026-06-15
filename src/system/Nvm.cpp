@@ -106,8 +106,9 @@ void Nvm::load(DeviceState& state, ImuManager& imu) {
     // Apply firmware defaults before NVM can override them.
     // setup() does memset(&g_state,0,...) which zeroes pitchAxis/rollAxis to 0,
     // which would hit the default: branch in ImuManager::update() and return 0.0f.
-    state.pitchAxis = +1;
-    state.rollAxis  = +2;
+    state.pitchAxis       = +1;
+    state.rollAxis        = +2;
+    state.autodimEnabled  = true;
 
     Preferences prefs;
     prefs.begin(kNs, true);

@@ -165,12 +165,16 @@ static void formatIso8601(time_t t, char* buf, size_t len) {
 
 // Assemble the STATUS response line
 static void buildStatusLine(const DeviceState& state, char* buf, size_t len) {
-    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d FW=%s",
+    char brtStr[8];
+    if (state.autodimEnabled) strncpy(brtStr, "AUTO", sizeof(brtStr));
+    else snprintf(brtStr, sizeof(brtStr), "%u", state.manualBrightnessVal);
+    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d BRIGHT=%s FW=%s",
              screenName(state.screenIndex),
              state.bleConnected ? 1 : 0,
              state.streamEnabled ? 1 : 0,
              state.batteryVoltage,
              state.nightMode ? 1 : 0,
+             brtStr,
              FW_VERSION);
 }
 
@@ -279,6 +283,7 @@ static const char* const kHelpLines[] = {
     "START_STREAM <ms>",
     "STOP_STREAM",
     "SET_NIGHT_MODE ON|OFF",
+    "SET_BRIGHT <0-255>|AUTO",
     "GET_BOARD",
     "GET_PITCHROLL",
     "SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y",
@@ -644,6 +649,23 @@ static void processCommand(const char* raw) {
             strncpy(resp, "OK NIGHT_MODE OFF", sizeof(resp) - 1);
         } else {
             strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1);
+        }
+
+    } else if (strcasecmp(tok, "SET_BRIGHT") == 0) {
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (!arg) { strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond; }
+        if (strcasecmp(arg, "AUTO") == 0) {
+            s_state->autodimEnabled = true;
+            strncpy(resp, "OK BRIGHT AUTO", sizeof(resp) - 1);
+        } else {
+            char* end;
+            long v = strtol(arg, &end, 10);
+            if (*end != '\0' || v < 0 || v > 255) {
+                strncpy(resp, "ERR BAD_ARGS", sizeof(resp) - 1); goto respond;
+            }
+            s_state->manualBrightnessVal = (uint8_t)v;
+            s_state->autodimEnabled      = false;
+            snprintf(resp, sizeof(resp), "OK BRIGHT %ld", v);
         }
 
     } else if (strcasecmp(tok, "SET_PITCHROLL") == 0) {

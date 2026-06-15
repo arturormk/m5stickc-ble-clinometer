@@ -776,6 +776,9 @@ _EXAMPLES: list[tuple[str, str | None]] = [
     ("m5ctl listen --stream 500", "stream tilt every 500 ms and print notifications"),
     ("m5ctl night-mode on", "enable red-only night mode"),
     ("m5ctl night-mode off", "restore normal colors"),
+    ("m5ctl set-bright 255", "full brightness, disable autodim"),
+    ("m5ctl set-bright 1",   "minimum brightness"),
+    ("m5ctl set-bright auto", "re-enable autodim"),
     ("m5ctl get-pitchroll", "show current pitch/roll axis assignment"),
     ("m5ctl set-pitchroll +X,+Y", "default: pitch=+X (top rises), roll=+Y (right backward rises)"),
     ("m5ctl set-pitchroll ~X,+Y", "pitch=-X  (use ~ for negative to avoid argparse flag conflicts)"),
@@ -941,6 +944,11 @@ p.add_argument("text", nargs='+', help="Message text (no quoting needed in scrip
 
 p = sub.add_parser("night-mode", help="Enable or disable red-only night mode")
 p.add_argument("state", choices=["on", "off"], help="on or off")
+
+p = sub.add_parser("set-bright",
+                   help="Set screen brightness or re-enable autodim (set-bright <0-255|auto>)")
+p.add_argument("level", metavar="LEVEL",
+               help="Brightness 0-255, or 'auto' to re-enable autodim")
 
 sub.add_parser("get-pitchroll", help="Show current pitch/roll axis assignment")
 p = sub.add_parser(
@@ -1391,6 +1399,20 @@ def dispatch(args) -> None:
             do_send(args, f"SHOW_MSG_WAIT {dur} {args.buttons} {' '.join(args.text)}")
         case "night-mode":
             do_send(args, f"SET_NIGHT_MODE {args.state.upper()}")
+        case "set-bright":
+            v = args.level.strip()
+            if v.lower() == "auto":
+                do_send(args, "SET_BRIGHT AUTO")
+            else:
+                try:
+                    n = int(v)
+                    if not 0 <= n <= 255:
+                        raise ValueError
+                except ValueError:
+                    print(f"error: brightness must be 0-255 or 'auto', got {v!r}",
+                          file=sys.stderr)
+                    sys.exit(1)
+                do_send(args, f"SET_BRIGHT {n}")
         case "get-pitchroll":
             do_send(args, "GET_PITCHROLL")
         case "set-pitchroll":

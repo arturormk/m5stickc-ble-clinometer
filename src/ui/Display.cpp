@@ -35,6 +35,15 @@ void Display::_updateBrightness(const DeviceState& state) {
         _lastTiltActivityMs = now;
     }
 
+    if (!state.autodimEnabled) {
+        uint8_t target = state.manualBrightnessVal;
+        if (target != _currentBrightness) {
+            setBrightness(target);
+            _currentBrightness = target;
+        }
+        return;
+    }
+
     uint8_t target;
     if (state.nightMode) {
         target = BRIGHTNESS_NIGHT;

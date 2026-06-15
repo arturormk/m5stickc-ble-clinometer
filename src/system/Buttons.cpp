@@ -1,22 +1,49 @@
 #include "Buttons.h"
 
 void Buttons::begin() {
-    _topHeld         = false;
-    _topPressStartMs = 0;
+    _topHeld           = false;
+    _topPressStartMs   = 0;
+    _frontHeld         = false;
+    _frontLongFired    = false;
+    _frontPressStartMs = 0;
+    _brightnessStepIdx = 0;
 }
 
+static constexpr uint8_t kBrightnessSteps[]  = { 255, 128, 32, 1 };
+static constexpr int     kBrightnessStepCount = 4;
+
 void Buttons::update(DeviceState& state, PowerManager& power) {
-    // Front button (BtnA = GPIO 37): cycle screens or send BLE button event
-    if (M5.BtnA.wasPressed()) {
-        if (state.messageActive && (state.messageAwaitButtons & BTN_MASK_M5)) {
-            if (!state.pendingBleEventReady) {
-                strncpy((char*)state.pendingBleEvent, "EVENT BUTTON M5",
-                        sizeof(state.pendingBleEvent) - 1);
-                state.pendingBleEventReady = true;
+    // Front button (BtnA = GPIO 37): short press = cycle screens / BLE event;
+    //                                long press  = step through brightness levels
+    bool frontDown = M5.BtnA.isPressed();
+    if (frontDown) {
+        if (!_frontHeld) {
+            _frontHeld         = true;
+            _frontLongFired    = false;
+            _frontPressStartMs = millis();
+        } else if (!_frontLongFired && (millis() - _frontPressStartMs) >= LONG_PRESS_A_MS) {
+            _frontLongFired        = true;
+            _brightnessStepIdx     = (_brightnessStepIdx + 1) % kBrightnessStepCount;
+            state.manualBrightnessVal = kBrightnessSteps[_brightnessStepIdx];
+            state.autodimEnabled   = false;
+        }
+    } else {
+        if (_frontHeld) {
+            bool wasShort = (millis() - _frontPressStartMs) < LONG_PRESS_A_MS;
+            _frontHeld      = false;
+            _frontLongFired = false;
+            if (wasShort) {
+                if (state.messageActive && (state.messageAwaitButtons & BTN_MASK_M5)) {
+                    if (!state.pendingBleEventReady) {
+                        strncpy((char*)state.pendingBleEvent, "EVENT BUTTON M5",
+                                sizeof(state.pendingBleEvent) - 1);
+                        state.pendingBleEventReady = true;
+                    }
+                } else if (state.screenIndex != SCREEN_MESSAGE) {
+                    int from = (state.screenIndex >= SCREEN_SYSINFO_1) ? SCREEN_BATTERY : state.screenIndex;
+                    state.screenIndex = (from + 1) % 5;
+                }
             }
-        } else if (state.screenIndex != SCREEN_MESSAGE) {
-            int from = (state.screenIndex >= SCREEN_SYSINFO_1) ? SCREEN_BATTERY : state.screenIndex;
-            state.screenIndex = (from + 1) % 5;
         }
     }
 

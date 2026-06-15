@@ -30,7 +30,7 @@ A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices 
 - Supports **night mode** — switches all display colours to red/orange-red to preserve dark-adapted vision at the eyepiece
 - **Configurable pitch and roll axes** — each angle can be assigned to any signed UX axis (`+X`, `-X`, `+Y`, `-Y`) via `SET_PITCHROLL`, so the clinometer reads correctly regardless of how the device is physically oriented or mounted; the bubble level position always tracks the true physical level independently of the axis assignment
 - **Persists settings across power cycles** — the RTC always stores true UTC and is restored automatically on every boot. The timezone label, UTC offset, observer longitude, calibration reference vector, and pitch/roll axis assignment can additionally be saved to on-chip NVM with an explicit `PERSIST` command; on the next boot the device restores all of these without any BLE interaction. `PERSIST CLEAR` invalidates stored settings with a single flash write; `PERSIST RESTORE` re-applies stored settings to the running device without a reboot. On devices without an onboard RTC (e.g. M5Stack Grey) the clock is not preserved across power cycles; `SET_TIME` must be re-sent after each reboot
-- **Auto-dim** — the backlight drops to a low level after 60 seconds of inactivity (no BLE command received and no tilt change exceeding 5°). Full brightness resumes immediately on the next BLE command or when the device is moved beyond the threshold. When tilt streaming is active the display is always kept at full brightness. Night mode overrides all of this with its own fixed dim level
+- **Auto-dim** — the backlight drops to a low level after 60 seconds of inactivity (no BLE command received and no tilt change exceeding 5°). The autodim ceiling is 128 (out of 255); full hardware brightness (255) is available by setting brightness manually. Autodim resumes immediately on the next BLE command or when the device is moved beyond the threshold. When tilt streaming is active the display is always kept at the autodim ceiling. Night mode overrides autodim with its own fixed dim level. The `SET_BRIGHT` command sets a fixed level (0–255) that suspends autodim entirely; `SET_BRIGHT AUTO` re-enables it. A long-press of the front button cycles through four preset levels and also suspends autodim
 
 ## Hardware
 
@@ -248,6 +248,7 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← START_STREAM <ms>
 ← STOP_STREAM
 ← SET_NIGHT_MODE ON|OFF
+← SET_BRIGHT <0-255>|AUTO
 ← GET_PITCHROLL
 ← SET_PITCHROLL <pitch>,<roll>  axes: +X|-X|+Y|-Y
 ← BEEP [<notes...>]
@@ -434,7 +435,7 @@ Returns a one-line summary of device state.
 
 ```
 → GET_STATUS
-← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96 NIGHT=0
+← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96 NIGHT=0 BRIGHT=AUTO FW=1.2
 ```
 
 | Field | Values | Description |
@@ -444,6 +445,7 @@ Returns a one-line summary of device state.
 | `STREAM` | `0` `1` | Tilt streaming enabled |
 | `BAT` | float volts | Battery voltage (AXP2101) |
 | `NIGHT` | `0` `1` | Night mode enabled |
+| `BRIGHT` | `AUTO` or `0`–`255` | `AUTO` = autodim active; numeric = manually fixed brightness level |
 
 ---
 
@@ -778,6 +780,29 @@ Night mode persists until explicitly disabled or the device reboots. The current
 
 ---
 
+### `SET_BRIGHT <0-255|AUTO>`
+
+Sets a fixed backlight level or re-enables the autodim system.
+
+```
+→ SET_BRIGHT 255
+← OK BRIGHT 255
+
+→ SET_BRIGHT 32
+← OK BRIGHT 32
+
+→ SET_BRIGHT AUTO
+← OK BRIGHT AUTO
+
+← ERR BAD_ARGS   (if argument is missing, non-numeric and not AUTO, or out of 0–255 range)
+```
+
+When a numeric level is given the autodim system is suspended and the backlight is held at that exact level. The autodim ceiling when active is 128; `SET_BRIGHT 255` therefore exceeds what autodim would ever set on its own. `SET_BRIGHT AUTO` resumes autodim. Night mode is overridden by a subsequent `SET_BRIGHT`. The current state is reported by `GET_STATUS` as `BRIGHT=AUTO` or `BRIGHT=<n>`.
+
+The front button (BtnA) long-press also steps through four preset levels (255 → 128 → 32 → 1 → …) and suspends autodim in the same way. `SET_BRIGHT AUTO` is the only way to re-enable autodim.
+
+---
+
 ### `GET_PITCHROLL` {#get_pitchroll}
 
 Returns the current pitch and roll axis assignment.
@@ -1103,6 +1128,7 @@ options:
 | `listen` | `[--stream <ms>]` | Print all BLE notifications; `--stream <ms>` also starts tilt streaming on the same connection |
 | `stop-stream` | | Disable tilt streaming |
 | `night-mode` | `on\|off` | Enable or disable red-only night mode |
+| `set-bright` | `<0-255\|auto>` | Set a fixed backlight level or restore autodim (`auto`) |
 | `set-screen` | `<name>` | Navigate to a named screen: `CLINOMETER` `TIME` `RADEC` `ALTAZ` `BATTERY` `SYSINFO-1` through `SYSINFO-4` |
 | `get-pitchroll` | | Show current pitch and roll axis assignment |
 | `set-pitchroll` | `<pitch>,<roll>` | Set pitch and roll signed UX axes (e.g. `+X,+Y`); use `~` instead of `-` for a negative leading axis to avoid shell flag conflicts |
