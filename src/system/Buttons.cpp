@@ -1,7 +1,10 @@
 #include "Buttons.h"
 
-static constexpr uint8_t kBrightnessSteps[]  = { 255, 128, 32, 1 };
-static constexpr int     kBrightnessStepCount = 4;
+// 0 is the auto sentinel; all other values are manual brightness levels
+static constexpr uint8_t  kBrightnessSteps[]  = { 255, 128, 32, 1, 0 };
+static constexpr int      kBrightnessStepCount = 5;
+// pitch tracks brightness: A6 → E6 → A5 → A4; index matches kBrightnessSteps[0-3]
+static constexpr uint16_t kBrightTones[]       = { 1760, 1318, 880, 440 };
 
 void Buttons::begin() {
     _topHeld           = false;
@@ -23,21 +26,23 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
             _frontPressStartMs = millis();
         } else if (!_frontLongFired && (millis() - _frontPressStartMs) >= LONG_PRESS_A_MS) {
             _frontLongFired = true;
-            if (state.autodimEnabled) {
-                // Anchor to the actual display brightness so the first step is always
-                // a visible change. Find the greatest preset strictly below the current
-                // physical level; if none exists (already at minimum), fall back to
-                // index 0 (max brightness).
-                uint8_t cur = (uint8_t)M5.Display.getBrightness();
-                _brightnessStepIdx = 0;
-                for (int i = 0; i < kBrightnessStepCount; i++) {
-                    if (kBrightnessSteps[i] < cur) { _brightnessStepIdx = i; break; }
-                }
+            // Park at the auto slot (4) so the first press from auto lands on highest.
+            if (state.autodimEnabled) _brightnessStepIdx = 4;
+            _brightnessStepIdx = (_brightnessStepIdx + 1) % kBrightnessStepCount;
+            uint8_t step = kBrightnessSteps[_brightnessStepIdx];
+            if (step == 0) {
+                state.autodimEnabled      = true;
+                state.melodyNotes[0]      = {1000, 80};
+                state.melodyNotes[1]      = {0,    60};
+                state.melodyNotes[2]      = {1000, 80};
+                state.melodyPendingLength = 3;
             } else {
-                _brightnessStepIdx = (_brightnessStepIdx + 1) % kBrightnessStepCount;
+                state.manualBrightnessVal = step;
+                state.autodimEnabled      = false;
+                state.melodyNotes[0]      = {kBrightTones[_brightnessStepIdx], 80};
+                state.melodyPendingLength = 1;
             }
-            state.manualBrightnessVal = kBrightnessSteps[_brightnessStepIdx];
-            state.autodimEnabled      = false;
+            state.melodyPending = true;
         }
     } else {
         if (_frontHeld) {

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Firmware / Display** — `SET_BRIGHT <0-255>|AUTO` BLE command: sets a fixed backlight level (0–255) and suspends the autodim system, or restores autodim (`AUTO`). The autodim ceiling when active remains 128; `SET_BRIGHT` allows the full 0–255 hardware range. Night mode is overridden by a subsequent `SET_BRIGHT`. The command is proposed by [@senshu-hiro2](https://github.com/senshu-hiro2).
-- **Firmware / Display** — front button (BtnA) long-press (≥ 1 s) steps through four preset brightness levels (255 → 128 → 32 → 1 → …) and suspends autodim. Short-press continues to cycle screens as before.
+- **Firmware / Display** — front button (BtnA) long-press (≥ 1 s) cycles through five brightness presets — `255 → 128 → 32 → 1 → auto → 255 → …` — and plays a distinct tone at each step: higher pitch for higher brightness (A6/1760 Hz → E6/1318 Hz → A5/880 Hz → A4/440 Hz), with a double-beep (1000 Hz × 2, 60 ms gap) when the cycle wraps to auto. Reaching the `auto` step re-enables autodim, making BLE unnecessary to return to automatic brightness control. Short-press continues to cycle screens as before. Tone idea proposed by [@senshu-hiro2](https://github.com/senshu-hiro2).
 - **Firmware / BLE** — `GET_STATUS` response gains a `BRIGHT=` field: `BRIGHT=AUTO` when autodim is active, `BRIGHT=<n>` when a manual level is set.
 - **m5ctl** — `set-bright <0-255|auto>` subcommand: sets backlight level or restores autodim; validates range 0–255 client-side and exits with an error message for out-of-range or non-numeric, non-`auto` input.
 - **m5ctl** — `run FILE` subcommand: executes m5ctl commands from a file (or stdin when `FILE` is `-`) sequentially over a single BLE connection, with support for `! directive` lines that control timing, looping, interaction, and output validation. Available directives: `! wait <seconds>`, `! at HH:MM:SS`, `! for N` / `! endfor`, `! echo <text>`, `! expect <prefix>`, `! wait_tilt [<degrees>]`, `! exit`, `! timeout <secs> <directive>`, `! if <name>` / `! if_not <name>` / `! else` / `! endif`, `! set <name>`, `! unset <name>`. Unlike `script`, which batches all commands and sends them at once, `run` executes each item in order, inserting sleeps, loops, and event waits as it goes — making it suitable for demos, video narration, and timed automation. Proposed by [@senshu-hiro2](https://github.com/senshu-hiro2).
@@ -22,13 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tools/demo.m5s`** — full-device demo script showcasing all `run` directives and major firmware features: connectivity check, screen navigation, live tilt readings, night mode, melody playback, button interaction, and tilt detection. Run with `uv run tools/m5ctl -p run tools/demo.m5s`.
 
 ### Fixed
-- **Firmware / Brightness** — BtnA long-press brightness cycling now produces a visible
-  change on the first press from autodim mode. When `autodimEnabled` is true the step
-  index is anchored dynamically to the greatest preset value strictly below the current
-  physical brightness (read via `M5.Display.getBrightness()`), so the step that is
-  immediately applied is always a real change. Previously the step index was fixed at 0,
-  causing the first press to resolve to 128 — the same as the autodim ceiling — with no
-  visible effect.
+- **Firmware / Brightness** — BtnA long-press from autodim mode now always jumps to the highest preset (255/A6) on the first press, giving an immediate visible change. The previous dynamic-anchoring heuristic (which tried to land on the nearest preset below the current physical brightness) has been superseded by the new five-step cycle that includes auto as an explicit stop.
 - **Firmware / Battery** — Battery voltage display now shows `-- V` instead of an
   implausible fixed value (~6.30 V) when an ENV III Unit is connected via the Grove
   port on the M5StickC Plus 2. The anomalous reading is caused by an M5Unified library
