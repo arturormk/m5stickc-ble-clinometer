@@ -40,7 +40,11 @@ float PowerManager::readBatteryVoltage() {
         else if (lvl < 75) return 3.8f;
         else               return 4.0f;
     }
-    return M5.Power.getBatteryVoltage() / 1000.0f;
+    float v = M5.Power.getBatteryVoltage() / 1000.0f;
+    // Discard implausible readings; e.g. AXP2101 on StickC Plus 2 returns ~6.3 V
+    // when an ENV III unit is connected via Grove (upstream M5Unified bug).
+    if (v > 5.0f) return 0.0f;
+    return v;
 }
 
 int PowerManager::readBatteryLevel() {

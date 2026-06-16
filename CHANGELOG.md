@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tools/demo.m5s`** — full-device demo script showcasing all `run` directives and major firmware features: connectivity check, screen navigation, live tilt readings, night mode, melody playback, button interaction, and tilt detection. Run with `uv run tools/m5ctl -p run tools/demo.m5s`.
 
 ### Fixed
+- **Firmware / Brightness** — BtnA long-press brightness cycling now produces a visible
+  change on the first press from autodim mode. When `autodimEnabled` is true the step
+  index is anchored dynamically to the greatest preset value strictly below the current
+  physical brightness (read via `M5.Display.getBrightness()`), so the step that is
+  immediately applied is always a real change. Previously the step index was fixed at 0,
+  causing the first press to resolve to 128 — the same as the autodim ceiling — with no
+  visible effect.
+- **Firmware / Battery** — Battery voltage display now shows `-- V` instead of an
+  implausible fixed value (~6.30 V) when an ENV III Unit is connected via the Grove
+  port on the M5StickC Plus 2. The anomalous reading is caused by an M5Unified library
+  bug (reported upstream by the same contributor); readings above 5.0 V (impossible for
+  any supported LiPo cell) are now discarded and displayed as unavailable (`-- V`).
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 - **m5ctl `set-radec`** — negative declinations (e.g. `set-radec 06:45:09 -16:42:58`) were
   rejected by argparse with `error: the following arguments are required: dec` because
   argparse interprets any token starting with `-` that does not look like a bare number as

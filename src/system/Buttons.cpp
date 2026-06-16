@@ -1,5 +1,8 @@
 #include "Buttons.h"
 
+static constexpr uint8_t kBrightnessSteps[]  = { 255, 128, 32, 1 };
+static constexpr int     kBrightnessStepCount = 4;
+
 void Buttons::begin() {
     _topHeld           = false;
     _topPressStartMs   = 0;
@@ -8,9 +11,6 @@ void Buttons::begin() {
     _frontPressStartMs = 0;
     _brightnessStepIdx = 0;
 }
-
-static constexpr uint8_t kBrightnessSteps[]  = { 255, 128, 32, 1 };
-static constexpr int     kBrightnessStepCount = 4;
 
 void Buttons::update(DeviceState& state, PowerManager& power) {
     // Front button (BtnA = GPIO 37): short press = cycle screens / BLE event;
@@ -22,10 +22,22 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
             _frontLongFired    = false;
             _frontPressStartMs = millis();
         } else if (!_frontLongFired && (millis() - _frontPressStartMs) >= LONG_PRESS_A_MS) {
-            _frontLongFired        = true;
-            _brightnessStepIdx     = (_brightnessStepIdx + 1) % kBrightnessStepCount;
+            _frontLongFired = true;
+            if (state.autodimEnabled) {
+                // Anchor to the actual display brightness so the first step is always
+                // a visible change. Find the greatest preset strictly below the current
+                // physical level; if none exists (already at minimum), fall back to
+                // index 0 (max brightness).
+                uint8_t cur = (uint8_t)M5.Display.getBrightness();
+                _brightnessStepIdx = 0;
+                for (int i = 0; i < kBrightnessStepCount; i++) {
+                    if (kBrightnessSteps[i] < cur) { _brightnessStepIdx = i; break; }
+                }
+            } else {
+                _brightnessStepIdx = (_brightnessStepIdx + 1) % kBrightnessStepCount;
+            }
             state.manualBrightnessVal = kBrightnessSteps[_brightnessStepIdx];
-            state.autodimEnabled   = false;
+            state.autodimEnabled      = false;
         }
     } else {
         if (_frontHeld) {

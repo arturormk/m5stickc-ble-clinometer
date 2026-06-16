@@ -43,6 +43,10 @@ A BLE-enabled clinometer and telescope status display for M5Stack ESP32 devices 
 | PMIC | AXP2101 (battery management) |
 | Communication | Bluetooth Low Energy (BLE 4.2) |
 
+### Known limitations
+
+- **Battery voltage with ENV III attached** — On the M5StickC Plus 2, connecting an ENV III Unit via the Grove port causes `M5.Power.getBatteryVoltage()` (M5Unified) to return a fixed ~6.30 V instead of the true ~4.25 V. This is an upstream M5Unified library bug. The firmware discards the reading and shows `-- V` on the Battery screen; the battery percentage bar (derived from `getBatteryLevel()`) is unaffected. The issue does not occur on M5StickS3, Core2, or Grey.
+
 ## Installing from a pre-built release
 
 Pre-built firmware binaries for the **M5StickC Plus 2** are attached to every [GitHub Release](../../releases). Download the file named `firmware-vX.Y.Z-m5stickc-plus2.bin` and flash it with one of the methods below. No toolchain or build environment is required.
