@@ -6,9 +6,15 @@ static constexpr int      kBrightnessStepCount = 5;
 // pitch tracks brightness: A6 → E6 → C6 → A5, the notes of an A minor chord (root, fifth, third, root an octave down); index matches kBrightnessSteps[0-3]
 static constexpr uint16_t kBrightTones[]       = { 1760, 1319, 1047, 880 };
 
+// Descending power-down cue: A6 E6 A5 (eighth/eighth/quarter @ 120 BPM)
+static constexpr uint16_t kShutdownTones[] = { 1760, 1319, 880 };
+static constexpr uint16_t kShutdownDursMs[] = { 125, 125, 500 };
+
 void Buttons::begin() {
     _topHeld           = false;
-    _topPressStartMs   = 0;
+    _pwrHeld           = false;
+    _pwrPressStartMs   = 0;
+    _pwrTonePlayed     = false;
     _frontHeld         = false;
     _frontLongFired    = false;
     _frontPressStartMs = 0;
@@ -64,29 +70,47 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
         }
     }
 
-    // Side button (BtnB = GPIO 39): short press = reboot (not Core2, which has a hw reset), long press = deep sleep
+    // Side button (BtnB = GPIO 39): short press = reboot (not Core2, which has a hw reset) / navigate sysinfo screens.
     bool topDown = M5.BtnB.isPressed();
     if (topDown) {
-        if (!_topHeld) {
-            _topHeld         = true;
-            _topPressStartMs = millis();
-        } else if ((millis() - _topPressStartMs) >= LONG_PRESS_MS) {
-            power.deepSleep();
-        }
+        _topHeld = true;
     } else {
         if (_topHeld) {
             _topHeld = false;
-            if ((millis() - _topPressStartMs) < LONG_PRESS_MS) {
-                if (state.screenIndex == SCREEN_BATTERY) {
-                    state.screenIndex = SCREEN_SYSINFO_1;
-                } else if (state.screenIndex >= SCREEN_SYSINFO_1 && state.screenIndex < SCREEN_SYSINFO_LAST) {
-                    state.screenIndex++;
-                } else if (state.screenIndex == SCREEN_SYSINFO_LAST) {
-                    state.screenIndex = SCREEN_BATTERY;
-                } else if (M5.getBoard() != m5::board_t::board_M5StackCore2) {
-                    power.reboot();
-                }
+            if (state.screenIndex == SCREEN_BATTERY) {
+                state.screenIndex = SCREEN_SYSINFO_1;
+            } else if (state.screenIndex >= SCREEN_SYSINFO_1 && state.screenIndex < SCREEN_SYSINFO_LAST) {
+                state.screenIndex++;
+            } else if (state.screenIndex == SCREEN_SYSINFO_LAST) {
+                state.screenIndex = SCREEN_BATTERY;
+            } else if (M5.getBoard() != m5::board_t::board_M5StackCore2) {
+                power.reboot();
             }
         }
+    }
+
+    // Power switch (BtnPWR = GPIO 35 on StickC Plus2): the board's own hardware
+    // power circuit force-shuts-down/resets autonomously around the 2s mark,
+    // regardless of firmware (screen and LED react to it directly, and no
+    // software call can stop or delay it). All we can do is detect the hold
+    // early and queue the descending cue so it finishes well before that
+    // hardware cutoff; there is no software shutdown call to make here.
+    static constexpr uint32_t kShutdownMelodyAtMs = 1700;
+    bool pwrDown = M5.BtnPWR.isPressed();
+    if (pwrDown) {
+        if (!_pwrHeld) {
+            _pwrHeld         = true;
+            _pwrTonePlayed   = false;
+            _pwrPressStartMs = millis();
+        } else if (!_pwrTonePlayed && (millis() - _pwrPressStartMs) >= kShutdownMelodyAtMs) {
+            _pwrTonePlayed = true;
+            state.melodyNotes[0]      = {kShutdownTones[0], kShutdownDursMs[0]};
+            state.melodyNotes[1]      = {kShutdownTones[1], kShutdownDursMs[1]};
+            state.melodyNotes[2]      = {kShutdownTones[2], kShutdownDursMs[2]};
+            state.melodyPendingLength = 3;
+            state.melodyPending       = true;
+        }
+    } else {
+        _pwrHeld = false;
     }
 }

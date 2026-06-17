@@ -54,7 +54,3 @@ int PowerManager::readBatteryLevel() {
 void PowerManager::reboot() {
     esp_restart();
 }
-
-void PowerManager::deepSleep() {
-    M5.Power.powerOff();
-}

@@ -7,5 +7,4 @@ public:
     float readBatteryVoltage();
     int   readBatteryLevel();
     void  reboot();
-    void  deepSleep();
 };

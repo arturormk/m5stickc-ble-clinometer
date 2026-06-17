@@ -105,6 +105,13 @@ This is a [PlatformIO](https://platformio.org/) project targeting the Arduino fr
 
 Compilation is incremental — only changed files are recompiled. The script replaces the old separate `build` and `deploy` scripts.
 
+Use the `monitor` script to open a serial monitor on the flashed device (115200 baud), e.g. to read `Serial.print` debug output:
+
+```bash
+./monitor                  # connect to /dev/ttyACM0 (default)
+PORT=/dev/ttyUSB0 ./monitor # override the serial port
+```
+
 ### Supported board environments
 
 | Environment | Board | Platform |
@@ -183,7 +190,8 @@ Two persistent indicators appear on every screen:
 | Button | Short press | Long press |
 |---|---|---|
 | M5 (front) | Cycle to next screen (Clinometer→Time→RA/Dec→Alt/Az→Battery→…); from a System Info page: advance to Clinometer | **≥ 1 s:** step through brightness presets `255 → 128 → 32 → 1 → auto → 255 → …`, playing a tone at each step (see [`SET_BRIGHT`](#set_bright)) |
-| Top (side) | **Battery or System Info page:** advance to next System Info page (wraps back to Battery after page 4); **any other screen:** reboot | **≥ 2 s:** power off |
+| Top (side, BtnB) | **Battery or System Info page:** advance to next System Info page (wraps back to Battery after page 4); **any other screen:** reboot | none |
+| Power switch | none | **~2 s:** powers off the device. This is performed autonomously by the board's own hardware (M5StickC Plus2) and cannot be controlled or delayed by firmware. A descending tone (A6→E6→A5) starts around 1.7 s into the hold as a power-down cue, finishing (or being cut short) right as the hardware shuts the device down. |
 
 When a `SHOW_MSG_WAIT` message is active, pressing the M5 button (if it is in the watch list) sends a `EVENT BUTTON M5` notification over BLE instead of cycling screens.
 
@@ -1764,8 +1772,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   │   ├── Display.h
 │   │   └── Display.cpp    Screen renderers: six main screens + four System Info pages (sprite-buffered via M5GFX)
 │   └── system/
-│       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, power-off
-│       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot/sleep
+│       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, reboot
+│       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot, power-down tone cue
 │       └── Nvm.h/.cpp           NVM persistence (Preferences, namespace "clino")
 ├── tools/
 │   ├── m5ctl              Python 3 BLE command-line client
