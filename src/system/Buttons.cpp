@@ -3,8 +3,8 @@
 // 0 is the auto sentinel; all other values are manual brightness levels
 static constexpr uint8_t  kBrightnessSteps[]  = { 255, 128, 32, 1, 0 };
 static constexpr int      kBrightnessStepCount = 5;
-// pitch tracks brightness: A6 → E6 → A5 → A4; index matches kBrightnessSteps[0-3]
-static constexpr uint16_t kBrightTones[]       = { 1760, 1318, 880, 440 };
+// pitch tracks brightness: A6 → E6 → C6 → A5, the notes of an A minor chord (root, fifth, third, root an octave down); index matches kBrightnessSteps[0-3]
+static constexpr uint16_t kBrightTones[]       = { 1760, 1319, 1047, 880 };
 
 void Buttons::begin() {
     _topHeld           = false;
@@ -32,9 +32,9 @@ void Buttons::update(DeviceState& state, PowerManager& power) {
             uint8_t step = kBrightnessSteps[_brightnessStepIdx];
             if (step == 0) {
                 state.autodimEnabled      = true;
-                state.melodyNotes[0]      = {1000, 80};
-                state.melodyNotes[1]      = {0,    60};
-                state.melodyNotes[2]      = {1000, 80};
+                state.melodyNotes[0]      = {kBrightTones[0], 80};
+                state.melodyNotes[1]      = {0,                60};
+                state.melodyNotes[2]      = {kBrightTones[0], 80};
                 state.melodyPendingLength = 3;
             } else {
                 state.manualBrightnessVal = step;
