@@ -3,6 +3,7 @@
 These tests do not require a BLE device and run as part of the default pytest suite.
 """
 
+import asyncio
 import importlib.util
 import pathlib
 import re
@@ -749,6 +750,33 @@ async def test_connect_raises_after_all_retries_exhausted(m5ctl, monkeypatch):
     # disconnect is called after each failed attempt to release adapter resources;
     # the finally teardown is never reached since yield is never hit.
     assert client.disconnect.await_count == 3
+
+
+async def test_connect_bounds_a_hanging_connect_call(m5ctl, monkeypatch):
+    """connect() that never returns is bounded by asyncio.wait_for, not left to hang forever."""
+    async def hang_forever(*_a, **_kw):
+        await asyncio.Event().wait()
+
+    client, sleep = _mock_ble(m5ctl, monkeypatch, hang_forever)
+
+    with pytest.raises(TimeoutError):
+        async with m5ctl._connect("AA:BB:CC:DD:EE:FF", 0.05, retries=1):
+            pass
+
+    client.connect.assert_awaited_once()
+
+
+async def test_connect_does_not_retry_on_cancellation(m5ctl, monkeypatch):
+    """A CancelledError from connect() (e.g. Ctrl+C) propagates immediately, with no retry."""
+    client, sleep = _mock_ble(m5ctl, monkeypatch, [asyncio.CancelledError()])
+
+    with pytest.raises(asyncio.CancelledError):
+        async with m5ctl._connect("AA:BB:CC:DD:EE:FF", 10.0):
+            pass
+
+    client.connect.assert_awaited_once()
+    sleep.assert_not_awaited()
+    client.disconnect.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

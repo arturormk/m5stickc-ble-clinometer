@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (negative axis codes) — that rewrites a leading `-` in the DEC argument to `~` before
   parsing and restores it in the dispatch handler before sending the BLE command.
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+- **m5ctl** — on Windows, `_connect()` could hang indefinitely if the target device
+  went away (e.g. powered off) between the Windows pre-scan and the actual GATT
+  handshake. `BleakClient`'s own `timeout` constructor argument only bounds Bleak's
+  internal address-resolution scan, not `connect()` itself, so a vanished device left
+  the handshake with no enforced ceiling. `connect()` is now wrapped in
+  `asyncio.wait_for(..., timeout=timeout)` on every platform, so a stuck handshake
+  always fails after `timeout` seconds instead of hanging forever.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+- **m5ctl** — pressing Ctrl+C during a connection attempt produced a crash
+  (`Task was destroyed but it is pending!` / a `ProactorEventLoop.__del__`
+  traceback on Windows) instead of a clean exit. `_connect()`'s retry loop caught
+  `asyncio.CancelledError` together with ordinary BLE errors and looped back into
+  another sleep-and-retry cycle, which kept the task running after `asyncio.run()`
+  had already begun cancelling it during shutdown. `CancelledError` now gets its
+  own handler that disconnects and re-raises immediately, with no retry.
+  Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
 
 - **m5ctl** — script files read by `exec`, `script`, and `run`, as well as the device
   config file, were opened with `pathlib.Path.read_text()` without an explicit `encoding=`
