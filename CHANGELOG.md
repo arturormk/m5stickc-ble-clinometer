@@ -56,6 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had already begun cancelling it during shutdown. `CancelledError` now gets its
   own handler that disconnects and re-raises immediately, with no retry.
   Reported by [@senshu-hiro2](https://github.com/senshu-hiro2).
+- **3D viewer (`tests/3d_model.py`)** — brought the BLE worker's connection handling up
+  to par with the `m5ctl` fixes above. `client.connect()` is now wrapped in
+  `asyncio.wait_for(..., timeout=10.0)`, so a device that disappears mid-handshake can no
+  longer hang the worker thread forever (same root cause as the `m5ctl` Windows hang,
+  above). The worker's bare `except Exception` clauses are narrowed to
+  `(BleakError, asyncio.TimeoutError, OSError)`, so a genuine programming bug surfaces
+  instead of being silently retried forever behind the on-screen "error" text; the
+  `finally` block still unconditionally disconnects the BLE client regardless of which
+  exception type propagates. Separately, pressing Ctrl+C during the main render loop
+  previously skipped the existing graceful-shutdown block entirely (no `STOP_STREAM`,
+  no clean `disconnect()`, no `renderer.quit()`) because `KeyboardInterrupt` was never
+  caught; the render loop is now wrapped in `try/except KeyboardInterrupt` so Ctrl+C
+  falls through to that shutdown path instead of crashing past it.
 
 - **m5ctl** — script files read by `exec`, `script`, and `run`, as well as the device
   config file, were opened with `pathlib.Path.read_text()` without an explicit `encoding=`

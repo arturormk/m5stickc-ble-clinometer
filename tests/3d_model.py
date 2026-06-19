@@ -34,6 +34,7 @@ from OpenGL.GL import (
 from OpenGL.GLU import gluCylinder, gluDeleteQuadric, gluLookAt, gluNewQuadric, gluPerspective
 
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 # GLUT bitmap fonts — available if freeglut is installed (graceful fallback otherwise)
 _GLUT_OK = False
@@ -241,10 +242,10 @@ class BleWorker:
                         self._state.retrying = attempt > 0
                         self._state.retry_count = attempt
                     try:
-                        await client.connect()
+                        await asyncio.wait_for(client.connect(), timeout=10.0)
                         last_exc = None
                         break
-                    except Exception as exc:
+                    except (BleakError, asyncio.TimeoutError, OSError) as exc:
                         last_exc = exc
                         if attempt < 2 and not self._stop.is_set():
                             await asyncio.sleep(0.3 * (attempt + 1))
@@ -289,7 +290,7 @@ class BleWorker:
                 if client.is_connected:
                     await client.write_gatt_char(CMD_UUID, b"STOP_STREAM", response=False)
 
-            except Exception as exc:
+            except (BleakError, asyncio.TimeoutError, OSError) as exc:
                 with self._state.lock:
                     self._state.connected = False
                     self._state.retrying = False
@@ -753,51 +754,54 @@ def main() -> None:
     running       = True
     show_ux       = False
 
-    while running:
-        quit_req, new_model, toggle_axes = renderer.handle_events()
-        if quit_req:
-            running = False
-            continue
-        if toggle_axes:
-            show_ux = not show_ux
-        if new_model is not None:
-            model_idx = new_model
-            model = MODELS[model_idx]
-            renderer.apply_model(model)
-            board_applied = True
-
-        elif auto_model and not board_applied:
-            with state.lock:
-                bn = state.board_name
-            if bn:
-                model_idx = BOARD_TO_MODEL.get(bn, model_idx)
+    try:
+        while running:
+            quit_req, new_model, toggle_axes = renderer.handle_events()
+            if quit_req:
+                running = False
+                continue
+            if toggle_axes:
+                show_ux = not show_ux
+            if new_model is not None:
+                model_idx = new_model
                 model = MODELS[model_idx]
                 renderer.apply_model(model)
                 board_applied = True
 
-        with state.lock:
-            pitch       = state.pitch
-            roll        = state.roll
-            g           = state.g
-            pitch_axis  = state.pitch_axis
-            roll_axis   = state.roll_axis
-            connected   = state.connected
-            error       = state.error
-            retrying    = state.retrying
-            retry_count = state.retry_count
-            board_name  = state.board_name
+            elif auto_model and not board_applied:
+                with state.lock:
+                    bn = state.board_name
+                if bn:
+                    model_idx = BOARD_TO_MODEL.get(bn, model_idx)
+                    model = MODELS[model_idx]
+                    renderer.apply_model(model)
+                    board_applied = True
 
-        if demo_mode:
-            t     = pygame.time.get_ticks() / 1000.0
-            pitch = 25.0 * math.sin(t * 0.6)
-            roll  = 18.0 * math.cos(t * 0.4)
-            g     = 1.0
+            with state.lock:
+                pitch       = state.pitch
+                roll        = state.roll
+                g           = state.g
+                pitch_axis  = state.pitch_axis
+                roll_axis   = state.roll_axis
+                connected   = state.connected
+                error       = state.error
+                retrying    = state.retrying
+                retry_count = state.retry_count
+                board_name  = state.board_name
 
-        renderer.render(pitch, roll, g, connected, error, retrying, retry_count, demo_mode, model,
-                        pitch_axis=pitch_axis, roll_axis=roll_axis, show_ux=show_ux,
-                        board_name=board_name)
+            if demo_mode:
+                t     = pygame.time.get_ticks() / 1000.0
+                pitch = 25.0 * math.sin(t * 0.6)
+                roll  = 18.0 * math.cos(t * 0.4)
+                g     = 1.0
 
-        clock.tick(60)
+            renderer.render(pitch, roll, g, connected, error, retrying, retry_count, demo_mode, model,
+                            pitch_axis=pitch_axis, roll_axis=roll_axis, show_ux=show_ux,
+                            board_name=board_name)
+
+            clock.tick(60)
+    except KeyboardInterrupt:
+        running = False
 
     if worker:
         worker.signal_stop()
