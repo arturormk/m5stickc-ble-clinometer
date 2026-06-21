@@ -144,6 +144,11 @@ auto-stamps the build number in `src/version.h`:
 The hook increments `FW_VERSION` from `"MAJOR.MINOR"` to `"MAJOR.MINOR.NNN"` on
 every commit, where NNN is the total commit count. It is safe to re-run.
 
+The hook also keeps `tools/m5ctl`'s `_VERSION` constant in sync with `FW_VERSION`,
+but only opportunistically: it stamps `m5ctl` when `m5ctl` is already part of the
+commit, or when the MAJOR.MINOR portion has changed (e.g. a release cut). Routine
+firmware-only commits never produce a no-op version-bump diff against `m5ctl`.
+
 #### Version numbering
 
 - **Odd minor** (e.g. `1.3`) — development branch. The patch number is the

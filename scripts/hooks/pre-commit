@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Pre-commit hook: stamp src/version.h with the next build number.
+# Pre-commit hook: stamp src/version.h with the next build number, and
+# opportunistically sync tools/m5ctl's _VERSION to match.
 # Install via: ./scripts/install-hooks
 set -euo pipefail
 
-VERSION_FILE="$(git rev-parse --show-toplevel)/src/version.h"
+ROOT="$(git rev-parse --show-toplevel)"
+VERSION_FILE="$ROOT/src/version.h"
+M5CTL_FILE="$ROOT/tools/m5ctl"
 
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
     BUILD=$(( $(git rev-list --count HEAD) + 1 ))
@@ -25,17 +28,34 @@ fi
 MINOR=$(grep -oE '#define FW_VERSION "[0-9]+\.[0-9]+\.' "$VERSION_FILE" \
         | grep -oE '\.[0-9]+\.' | tr -d '.')
 if [[ -n "$MINOR" ]] && (( MINOR % 2 == 0 )); then
-    CURRENT_VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" | tr -d '"')
-    echo "pre-commit: FW_VERSION is ${CURRENT_VER} (release branch, not stamped)" >&2
-    exit 0
+    FINAL_VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" | tr -d '"')
+    echo "pre-commit: FW_VERSION is ${FINAL_VER} (release branch, not stamped)" >&2
+else
+    # Replace "MAJOR.MINOR" or "MAJOR.MINOR.OLD" with "MAJOR.MINOR.BUILD"
+    sed -i -E \
+        "s/(#define FW_VERSION \")([0-9]+\.[0-9]+)(\.[0-9]+)?(\")/\1\2.${BUILD}\4/" \
+        "$VERSION_FILE"
+
+    git add "$VERSION_FILE"
+
+    FINAL_VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" | tr -d '"')
+    echo "pre-commit: FW_VERSION stamped to ${FINAL_VER}" >&2
 fi
 
-# Replace "MAJOR.MINOR" or "MAJOR.MINOR.OLD" with "MAJOR.MINOR.BUILD"
-sed -i -E \
-    "s/(#define FW_VERSION \")([0-9]+\.[0-9]+)(\.[0-9]+)?(\")/\1\2.${BUILD}\4/" \
-    "$VERSION_FILE"
-
-git add "$VERSION_FILE"
-
-NEW_VER=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_FILE" | tr -d '"')
-echo "pre-commit: FW_VERSION stamped to ${NEW_VER}" >&2
+# Sync tools/m5ctl's _VERSION to match, but only when m5ctl is already part
+# of this commit (no added no-op commits) or MAJOR.MINOR has drifted (e.g. a
+# release cut), so m5ctl never silently goes stale at that level.
+if [[ -f "$M5CTL_FILE" ]] && grep -qE '_VERSION[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+' "$M5CTL_FILE"; then
+    CURRENT_M5CTL_VER=$(grep -oE '_VERSION[[:space:]]*=[[:space:]]*"[0-9.]+"' "$M5CTL_FILE" \
+            | grep -oE '"[0-9.]+"' | tr -d '"')
+    M5CTL_STAGED=$(git diff --cached --name-only -- "$M5CTL_FILE")
+    if [[ "${CURRENT_M5CTL_VER%.*}" != "${FINAL_VER%.*}" || -n "$M5CTL_STAGED" ]]; then
+        sed -i -E \
+            "s/(_VERSION[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+(\.[0-9]+)?(\")/\1${FINAL_VER}\3/" \
+            "$M5CTL_FILE"
+        git add "$M5CTL_FILE"
+        echo "pre-commit: m5ctl _VERSION synced to ${FINAL_VER}" >&2
+    fi
+else
+    echo "pre-commit: warning: _VERSION not found in $M5CTL_FILE, skipping sync" >&2
+fi
