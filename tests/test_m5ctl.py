@@ -374,6 +374,14 @@ def test_version_command(m5ctl, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == f"m5ctl {m5ctl._VERSION}"
 
 
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_help_shows_version(m5ctl, monkeypatch, capsys, flag):
+    monkeypatch.setattr(sys, "argv", ["m5ctl", flag])
+    with pytest.raises(SystemExit):
+        m5ctl.main()
+    assert f"m5ctl {m5ctl._VERSION}" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # cmd_list — no BLE hardware required
 # ---------------------------------------------------------------------------
