@@ -44,6 +44,8 @@ try:
 except Exception:
     pass
 
+_VERSION = "1.3.143"
+
 # ── BLE constants (mirrors tests/conftest.py) ──────────────────────────────────
 CMD_UUID      = "7d91b001-8f3b-4b63-b6a4-5d1e6b7a1000"
 RESP_UUID     = "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
@@ -706,7 +708,7 @@ def _scan_and_pick() -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="3D orientation visualizer for M5Stack BLE clinometer"
+        description=f"3d_model {_VERSION} — 3D orientation visualizer for M5Stack BLE clinometer"
     )
     parser.add_argument(
         "-d", "--device",

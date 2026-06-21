@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Pre-commit hook: stamp src/version.h with the next build number, and
-# opportunistically sync tools/m5ctl's _VERSION to match.
+# opportunistically sync tools/m5ctl's and tests/3d_model.py's _VERSION to match.
 # Install via: ./scripts/install-hooks
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 VERSION_FILE="$ROOT/src/version.h"
 M5CTL_FILE="$ROOT/tools/m5ctl"
+MODEL3D_FILE="$ROOT/tests/3d_model.py"
 
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
     BUILD=$(( $(git rev-list --count HEAD) + 1 ))
@@ -58,4 +59,20 @@ if [[ -f "$M5CTL_FILE" ]] && grep -qE '_VERSION[[:space:]]*=[[:space:]]*"[0-9]+\
     fi
 else
     echo "pre-commit: warning: _VERSION not found in $M5CTL_FILE, skipping sync" >&2
+fi
+
+# Sync tests/3d_model.py's _VERSION to match, same gating as m5ctl above.
+if [[ -f "$MODEL3D_FILE" ]] && grep -qE '_VERSION[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+' "$MODEL3D_FILE"; then
+    CURRENT_MODEL3D_VER=$(grep -oE '_VERSION[[:space:]]*=[[:space:]]*"[0-9.]+"' "$MODEL3D_FILE" \
+            | grep -oE '"[0-9.]+"' | tr -d '"')
+    MODEL3D_STAGED=$(git diff --cached --name-only -- "$MODEL3D_FILE")
+    if [[ "${CURRENT_MODEL3D_VER%.*}" != "${FINAL_VER%.*}" || -n "$MODEL3D_STAGED" ]]; then
+        sed -i -E \
+            "s/(_VERSION[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+(\.[0-9]+)?(\")/\1${FINAL_VER}\3/" \
+            "$MODEL3D_FILE"
+        git add "$MODEL3D_FILE"
+        echo "pre-commit: 3d_model.py _VERSION synced to ${FINAL_VER}" >&2
+    fi
+else
+    echo "pre-commit: warning: _VERSION not found in $MODEL3D_FILE, skipping sync" >&2
 fi
