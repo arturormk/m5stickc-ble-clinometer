@@ -166,18 +166,23 @@ static void formatIso8601(time_t t, char* buf, size_t len) {
 }
 
 // Assemble the STATUS response line
-static void buildStatusLine(const DeviceState& state, char* buf, size_t len) {
+static void buildStatusLine(const DeviceState& state, char* buf, size_t len,
+                             BatLog* batLog = nullptr) {
     char brtStr[8];
     if (state.autodimEnabled) strncpy(brtStr, "AUTO", sizeof(brtStr));
     else snprintf(brtStr, sizeof(brtStr), "%u", state.manualBrightnessVal);
-    snprintf(buf, len, "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d BRIGHT=%s FW=%s",
-             screenName(state.screenIndex),
-             state.bleConnected ? 1 : 0,
-             state.streamEnabled ? 1 : 0,
-             state.batteryVoltage,
-             state.nightMode ? 1 : 0,
-             brtStr,
-             FW_VERSION);
+    int n = snprintf(buf, len,
+                     "STATUS SCREEN=%s BLE=%d STREAM=%d BAT=%.2f NIGHT=%d BRIGHT=%s FW=%s",
+                     screenName(state.screenIndex),
+                     state.bleConnected ? 1 : 0,
+                     state.streamEnabled ? 1 : 0,
+                     state.batteryVoltage,
+                     state.nightMode ? 1 : 0,
+                     brtStr,
+                     FW_VERSION);
+    if (batLog && batLog->isActive() && n > 0 && (size_t)n < len)
+        snprintf(buf + n, len - (size_t)n, " BAT_LOG=%lu",
+                 (unsigned long)batLog->intervalSec());
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +359,7 @@ static void processCommand(const char* raw) {
                  axisCodeStr(s_state->pitchAxis), axisCodeStr(s_state->rollAxis));
 
     } else if (strcasecmp(tok, "GET_STATUS") == 0) {
-        buildStatusLine(*s_state, resp, sizeof(resp));
+        buildStatusLine(*s_state, resp, sizeof(resp), s_batLog);
 
     } else if (strcasecmp(tok, "GET_TIME") == 0) {
         if (s_state->utcAnchorSec == 0) {

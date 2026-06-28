@@ -30,9 +30,10 @@ public:
     void onEvent(BatLogType type, const DeviceState& state);
     void clear();
 
-    bool        isActive() const { return _active; }
-    int         count()    const { return (int)_count; }
-    BatLogEntry entry(int i) const;
+    bool        isActive()    const { return _active; }
+    int         count()       const { return (int)_count; }
+    uint32_t    intervalSec() const { return _intervalMs / 1000; }
+    BatLogEntry entry(int i)  const;
 
 private:
     static constexpr int kCapacity = 128;

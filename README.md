@@ -454,6 +454,8 @@ Returns a one-line summary of device state.
 ```
 → GET_STATUS
 ← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96 NIGHT=0 BRIGHT=AUTO FW=1.2
+
+← STATUS SCREEN=CLINOMETER BLE=1 STREAM=0 BAT=3.96 NIGHT=0 BRIGHT=AUTO FW=1.2 BAT_LOG=300
 ```
 
 | Field | Values | Description |
@@ -464,6 +466,7 @@ Returns a one-line summary of device state.
 | `BAT` | float volts | Battery voltage (AXP2101) |
 | `NIGHT` | `0` `1` | Night mode enabled |
 | `BRIGHT` | `AUTO` or `0`–`255` | `AUTO` = autodim active; numeric = manually fixed brightness level |
+| `BAT_LOG` | integer seconds, or absent | Sample interval when battery telemetry logging is active (see `START_BAT_LOG`); field is omitted entirely when logging is off |
 
 ---
 
