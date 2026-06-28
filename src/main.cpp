@@ -7,6 +7,7 @@
 #include "system/Buttons.h"
 #include "system/PowerManager.h"
 #include "system/Nvm.h"
+#include "system/BatLog.h"
 
 // --- Global singletons ---
 DeviceState  g_state;
@@ -15,6 +16,7 @@ BleManager   g_ble;
 Display      g_display;
 Buttons      g_buttons;
 PowerManager g_power;
+BatLog       g_batLog;
 
 static uint32_t s_lastBatMs = 0;
 
@@ -56,8 +58,10 @@ void setup() {
     Serial.begin(115200);
 
     memset(&g_state, 0, sizeof(g_state));
-    g_state.longitudeDeg      = NAN;  // 0.0f is a valid longitude; NaN means not configured
-    g_state.pendingBleHelpLine = -1;  // 0 would trigger immediate HELP output
+    g_state.longitudeDeg       = NAN;  // 0.0f is a valid longitude; NaN means not configured
+    g_state.pendingBleHelpLine = -1;   // 0 would trigger immediate HELP output
+    g_state.pendingBatLogLine  = -1;
+    g_state.pendingBatLogEnd   = -1;
     g_state.screenIndex     = SCREEN_CLINOMETER;
     g_state.prevScreenIndex = SCREEN_CLINOMETER;
     g_state.batteryLevel    = -1;
@@ -70,10 +74,12 @@ void setup() {
 
     g_power.begin();
     g_buttons.begin();
-    g_display.begin();
+    g_batLog.begin();
+    g_display.begin(&g_batLog);
     g_imu.begin();
-    g_ble.begin(&g_state, &g_imu);
+    g_ble.begin(&g_state, &g_imu, &g_batLog);
     Nvm::load(g_state, g_imu);
+    g_batLog.onEvent(BAT_LOG_BOOT, g_state);
 }
 
 void loop() {
@@ -90,6 +96,7 @@ void loop() {
         s_lastBatMs = now;
     }
 
+    g_batLog.tick(g_state);
     g_ble.update(g_state);
     if (g_state.pendingReboot) {
         delay(200);   // allow BLE notification to drain before reset

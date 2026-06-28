@@ -2,9 +2,11 @@
 #include <M5Unified.h>
 #include "../model/DeviceState.h"
 
+class BatLog;  // forward declaration
+
 class Display {
 public:
-    void begin();
+    void begin(BatLog* batLog = nullptr);
     void update(const DeviceState& state);
     void setBrightness(uint8_t val);
 
@@ -16,6 +18,7 @@ private:
     static constexpr uint32_t SKIP_GRACE_MS    = 30000;
     static constexpr float    DIM_STABLE_DEG   = 5.0f;
 
+    BatLog*      _batLog  = nullptr;
     LGFX_Sprite* _sprite = nullptr;
     uint32_t     _lastRefreshMs = 0;
     int          _W = 0, _H = 0;   // screen dimensions, set in begin()

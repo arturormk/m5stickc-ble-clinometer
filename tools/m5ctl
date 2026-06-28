@@ -17,7 +17,7 @@ from bleak.exc import BleakDeviceNotFoundError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
-_VERSION   = "1.3.142"
+_VERSION   = "1.3.144"
 
 
 def _get_conf_path() -> pathlib.Path:
@@ -460,6 +460,92 @@ async def cmd_run(
                         sys.exit(1)
 
 
+async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False) -> None:
+    """Retrieve the full battery telemetry log via paged GET_BAT_LOG requests."""
+    entries: list[str] = []
+    queue: "asyncio.Queue[str]" = asyncio.Queue()
+
+    def on_notify(_, data: bytearray) -> None:
+        queue.put_nowait(data.decode("utf-8", errors="replace").strip())
+
+    async with _connect(address, CONNECT_TIMEOUT) as client:
+        await _start_notify(client, RESP_UUID, on_notify)
+
+        page = 0
+        total_pages = 1
+
+        while page < total_pages:
+            cmd = f"GET_BAT_LOG {page}"
+            if print_cmd:
+                print(f">>> {cmd}", file=sys.stderr)
+            await client.write_gatt_char(CMD_UUID, cmd.encode("utf-8"), response=False)
+
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    print(f"error: no response within {timeout}s", file=sys.stderr)
+                    sys.exit(1)
+
+                if line.startswith("BATLOG END"):
+                    total_pages = 0
+                    break
+                elif line.startswith("BATLOG PAGE"):
+                    # "BATLOG PAGE p/N COUNT C"
+                    parts = line.split()
+                    try:
+                        p_n = parts[2].split("/")
+                        total_pages = int(p_n[1])
+                    except (IndexError, ValueError):
+                        total_pages = page + 1
+                    break
+                elif line.startswith("BATLOG "):
+                    entries.append(line)
+
+            page += 1
+
+    if not entries:
+        print("(no log entries)")
+        return
+
+    _SCREEN_NAMES_MAP = {
+        "0": "CLINOMETER", "1": "TIME",    "2": "RADEC",     "3": "ALTAZ",
+        "4": "BATTERY",    "5": "MESSAGE", "6": "SYSINFO-1", "7": "SYSINFO-2",
+        "8": "SYSINFO-3",  "9": "SYSINFO-4",
+    }
+    print(f"{'Timestamp':<22} {'Type':<8} {'Level':>5} {'Voltage':>8}  {'Screen'}")
+    print("-" * 60)
+    for line in entries:
+        # "BATLOG <utcSec> <TYPE> <batLevel> <batMv> <screenIdx>"
+        parts = line.split()
+        if len(parts) < 6:
+            print(line)
+            continue
+        try:
+            utc_sec   = int(parts[1])
+            type_str  = parts[2]
+            bat_level = int(parts[3])
+            bat_mv    = int(parts[4])
+            scr_idx   = parts[5]
+        except (IndexError, ValueError):
+            print(line)
+            continue
+
+        if utc_sec > 0:
+            try:
+                dt = datetime.fromtimestamp(utc_sec, tz=timezone.utc)
+                ts = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except (OSError, ValueError):
+                ts = str(utc_sec)
+        else:
+            ts = "(no time)             "
+
+        level_str = f"{bat_level}%" if bat_level <= 100 else "?"
+        volt_str  = f"{bat_mv / 1000:.3f}V" if bat_mv > 0 else "?"
+        scr_name  = _SCREEN_NAMES_MAP.get(scr_idx, scr_idx)
+        print(f"{ts:<22} {type_str:<8} {level_str:>5} {volt_str:>8}  {scr_name}")
+
+
 async def cmd_listen(address: str, stream_ms: int | None = None) -> None:
     """Subscribe to the response characteristic and print every notification."""
 
@@ -798,6 +884,11 @@ _EXAMPLES: list[tuple[str, str | None]] = [
     ("m5ctl persist-read", "show stored NVS values (valid flag + all keys)"),
     ("m5ctl persist-clear", "invalidate stored values (1 NVS write, data kept)"),
     ("m5ctl persist-restore", "re-enable and apply last stored values in-session"),
+    ("m5ctl bat-log-start", "enable battery telemetry logging (5-min interval)"),
+    ("m5ctl bat-log-start --interval 60", "log every 60 seconds"),
+    ("m5ctl bat-log", "print full battery telemetry log as a table"),
+    ("m5ctl bat-log-stop", "disable battery telemetry logging"),
+    ("m5ctl bat-log-clear", "wipe the battery telemetry ring buffer"),
     ("m5ctl reboot", "software-reset the device"),
     ("m5ctl listen", "print all notifications (events, screen changes…)"),
     ("m5ctl terminal", "interactive BLE terminal (persistent session, live notifications)"),
@@ -980,6 +1071,14 @@ p.add_argument(
     ),
 )
 
+p = sub.add_parser("bat-log-start",
+                   help="Enable battery telemetry logging with optional sample interval")
+p.add_argument("--interval", type=int, default=300, metavar="SECS",
+               help="Sample interval in seconds (default: 300, range: 10-86400)")
+sub.add_parser("bat-log-stop",  help="Disable battery telemetry logging")
+sub.add_parser("bat-log",       help="Retrieve and display the full battery telemetry log")
+sub.add_parser("bat-log-clear", help="Clear the battery telemetry log ring buffer")
+
 _SCREEN_NAMES = ["CLINOMETER", "TIME", "RADEC", "ALTAZ", "BATTERY",
                  "SYSINFO-1", "SYSINFO-2", "SYSINFO-3", "SYSINFO-4"]
 p = sub.add_parser("set-screen",
@@ -1008,7 +1107,7 @@ p.add_argument("notes", nargs="*",
 # ---------------------------------------------------------------------------
 
 _NON_SCRIPT_CMDS = frozenset({
-    "list", "version", "help", "scan", "listen",
+    "list", "version", "help", "scan", "listen", "bat-log",
     "exec", "script", "run", "terminal", "term", None,
 })
 
@@ -1448,6 +1547,15 @@ def dispatch(args) -> None:
             do_send(args, "PERSIST CLEAR")
         case "persist-restore":
             do_send(args, "PERSIST RESTORE")
+        case "bat-log-start":
+            iv = max(10, min(86400, args.interval))
+            do_send(args, f"START_BAT_LOG {iv}")
+        case "bat-log-stop":
+            do_send(args, "STOP_BAT_LOG")
+        case "bat-log":
+            run(cmd_bat_log(args.device, args.timeout, print_cmd=args.print_cmd))
+        case "bat-log-clear":
+            do_send(args, "CLEAR_BAT_LOG")
         case "reboot":
             do_send(args, "REBOOT")
         case "exec":

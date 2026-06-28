@@ -12,9 +12,11 @@
 #define BLE_RESP_UUID    "7d91b002-8f3b-4b63-b6a4-5d1e6b7a1000"
 #define BLE_STATUS_UUID  "7d91b003-8f3b-4b63-b6a4-5d1e6b7a1000"
 
+class BatLog;  // forward declaration
+
 class BleManager {
 public:
-    void begin(DeviceState* state, ImuManager* imu);
+    void begin(DeviceState* state, ImuManager* imu, BatLog* batLog = nullptr);
     void update(DeviceState& state);
 
     void sendResponse(const char* msg);

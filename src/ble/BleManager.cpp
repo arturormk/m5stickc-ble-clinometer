@@ -1,6 +1,7 @@
 #include "BleManager.h"
 #include "../imu/ImuManager.h"
 #include "../system/Nvm.h"
+#include "../system/BatLog.h"
 #include <M5Unified.h>
 #include <time.h>
 #include <string.h>
@@ -12,8 +13,9 @@
 // Module-level state accessible from callbacks
 // ---------------------------------------------------------------------------
 
-static DeviceState* s_state = nullptr;
-static ImuManager*  s_imu   = nullptr;
+static DeviceState* s_state  = nullptr;
+static ImuManager*  s_imu    = nullptr;
+static BatLog*      s_batLog = nullptr;
 static BLECharacteristic* s_pRespChar = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -243,6 +245,7 @@ class BleServerCallbacks : public BLEServerCallbacks {
         if (s_state) {
             s_state->bleConnected = true;
             s_state->lastBleCommandMs = millis();
+            s_state->pendingBatLogEvent = 1;  // deferred to main loop
         }
     }
     void onDisconnect(BLEServer*) override {
@@ -250,6 +253,7 @@ class BleServerCallbacks : public BLEServerCallbacks {
             s_state->bleConnected = false;
             s_state->bleClientWantsNewline = false;
             s_state->streamEnabled = false;
+            s_state->pendingBatLogEvent = 2;  // deferred to main loop
         }
     }
 };
@@ -291,6 +295,7 @@ static const char* const kHelpLines[] = {
     "SET_SCREEN CLINOMETER|TIME|RADEC|ALTAZ|BATTERY|SYSINFO-1..4",
     "PERSIST [CLEAR|RESTORE|READ]",
     "REBOOT",
+    "START_BAT_LOG [<s>]|STOP_BAT_LOG|GET_BAT_LOG [<p>]|CLEAR_BAT_LOG",
     "HELP",  // must remain last — clients use it as a stream terminator
 };
 static const int kHelpLineCount = (int)(sizeof(kHelpLines) / sizeof(kHelpLines[0]));
@@ -789,6 +794,42 @@ static void processCommand(const char* raw) {
         strncpy(resp, "OK REBOOTING", sizeof(resp) - 1);
         s_state->pendingReboot = true;
 
+    } else if (strcasecmp(tok, "START_BAT_LOG") == 0) {
+        uint32_t intervalSec = 300;
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (arg) {
+            long v = atol(arg);
+            if (v >= 10 && v <= 86400) intervalSec = (uint32_t)v;
+        }
+        if (s_batLog) s_batLog->start(*s_state, intervalSec);
+        snprintf(resp, sizeof(resp), "OK BAT_LOG_STARTED %lu", (unsigned long)intervalSec);
+
+    } else if (strcasecmp(tok, "STOP_BAT_LOG") == 0) {
+        if (s_batLog) s_batLog->stop();
+        strncpy(resp, "OK BAT_LOG_STOPPED", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "CLEAR_BAT_LOG") == 0) {
+        if (s_batLog) s_batLog->clear();
+        strncpy(resp, "OK BAT_LOG_CLEARED", sizeof(resp) - 1);
+
+    } else if (strcasecmp(tok, "GET_BAT_LOG") == 0) {
+        int page = 0;
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (arg) page = atoi(arg);
+        int total = s_batLog ? s_batLog->count() : 0;
+        if (total == 0 || page * 16 >= total) {
+            snprintf(resp, sizeof(resp), "BATLOG END %d", total);
+            goto respond;
+        }
+        {
+            int start = page * 16;
+            int end   = start + 16;
+            if (end > total) end = total;
+            s_state->pendingBatLogLine = (int16_t)start;
+            s_state->pendingBatLogEnd  = (int16_t)end;
+        }
+        return;  // streaming handled in update(); no pendingBleResponseReady set
+
     } else if (strcasecmp(tok, "HELP") == 0 || strcasecmp(tok, "?") == 0) {
         s_state->pendingBleHelpLine = 0;
         return;
@@ -834,9 +875,10 @@ class BleCmdCallbacks : public BLECharacteristicCallbacks {
 // BleManager
 // ---------------------------------------------------------------------------
 
-void BleManager::begin(DeviceState* state, ImuManager* imu) {
-    s_state = state;
-    s_imu   = imu;
+void BleManager::begin(DeviceState* state, ImuManager* imu, BatLog* batLog) {
+    s_state  = state;
+    s_imu    = imu;
+    s_batLog = batLog;
 
     // Ensure mktime interprets struct tm as UTC (makes mktime behave as timegm)
     setenv("TZ", "UTC0", 1);
@@ -907,6 +949,47 @@ void BleManager::update(DeviceState& state) {
         } else {
             state.pendingBleHelpLine = -1;
         }
+    }
+
+    // Stream bat log entries one per tick (≤16 entries + 1 footer per GET_BAT_LOG call)
+    if (state.pendingBatLogLine >= 0 && s_batLog) {
+        if (state.pendingBatLogLine < state.pendingBatLogEnd) {
+            BatLogEntry e = s_batLog->entry(state.pendingBatLogLine);
+            const char* typeName;
+            switch ((BatLogType)e.type) {
+                case BAT_LOG_SAMPLE:         typeName = "SAMPLE";  break;
+                case BAT_LOG_BOOT:           typeName = "BOOT";    break;
+                case BAT_LOG_SLEEP_ENTER:    typeName = "SLEEP";   break;
+                case BAT_LOG_BLE_CONNECT:    typeName = "BLE_CON"; break;
+                case BAT_LOG_BLE_DISCONNECT: typeName = "BLE_DIS"; break;
+                case BAT_LOG_SCREEN_CHANGE:  typeName = "SCR_CHG"; break;
+                default:                     typeName = "UNKNOWN"; break;
+            }
+            char buf[80];
+            snprintf(buf, sizeof(buf), "BATLOG %lu %s %d %u %d",
+                     (unsigned long)e.utcSec, typeName,
+                     (int)e.batLevel, (unsigned)e.batMv, (int)e.screenIdx);
+            sendResponse(buf);
+            state.pendingBatLogLine++;
+        } else {
+            int total  = s_batLog->count();
+            int page   = (state.pendingBatLogEnd - 1) / 16;
+            int pages  = (total + 15) / 16;
+            if (pages <= 0) pages = 1;
+            char footer[48];
+            snprintf(footer, sizeof(footer), "BATLOG PAGE %d/%d COUNT %d", page, pages, total);
+            sendResponse(footer);
+            state.pendingBatLogLine = -1;
+            state.pendingBatLogEnd  = -1;
+        }
+    }
+
+    // Dispatch deferred bat log BLE connect/disconnect events (written by BLE task)
+    if (state.pendingBatLogEvent != 0 && s_batLog) {
+        BatLogType btype = (state.pendingBatLogEvent == 1)
+                         ? BAT_LOG_BLE_CONNECT : BAT_LOG_BLE_DISCONNECT;
+        s_batLog->onEvent(btype, state);
+        state.pendingBatLogEvent = 0;
     }
 
     // Drain pending button event

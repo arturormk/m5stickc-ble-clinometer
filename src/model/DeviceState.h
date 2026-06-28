@@ -107,7 +107,10 @@ struct DeviceState {
     volatile bool pendingBleResponseReady;
     volatile char pendingBleEvent[64];
     volatile bool pendingBleEventReady;
-    volatile int16_t pendingBleHelpLine;  // -1 = idle; 0..N = next line to send; N+1 = send "OK"
+    volatile int16_t pendingBleHelpLine;   // -1 = idle; 0..N = next line to send
+    volatile int16_t pendingBatLogLine;   // -1 = idle; >= 0 = next entry index to stream
+    volatile int16_t pendingBatLogEnd;    // exclusive end for current page
+    volatile uint8_t pendingBatLogEvent;  // 0 = none; 1 = BLE_CONNECT; 2 = BLE_DISCONNECT
     volatile bool bleClientWantsNewline;
 
 };

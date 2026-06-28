@@ -1,11 +1,13 @@
 #include "Display.h"
 #include "../version.h"
+#include "../system/BatLog.h"
 #include "esp_heap_caps.h"
 #include <lgfx/Fonts/GFXFF/FreeSans9pt7b.h>
 #include <math.h>
 #include <time.h>
 
-void Display::begin() {
+void Display::begin(BatLog* batLog) {
+    _batLog = batLog;
     bool isStick = (M5.getBoard() == m5::board_t::board_M5StickCPlus2
                  || M5.getBoard() == m5::board_t::board_M5StickCPlus
                  || M5.getBoard() == m5::board_t::board_M5StickS3);
@@ -535,6 +537,10 @@ void Display::_drawBattery(const DeviceState& state) {
     bool n = state.nightMode;
     int pct = state.batteryLevel;
 
+    // Decide whether we have enough SAMPLE history to show a sparkline.
+    // Check for at least 2 entries; the sparkline drawing below guards nVals>=2.
+    bool hasSparkline = (_batLog != nullptr && _batLog->count() >= 2);
+
     // Title
     _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_CYAN, n));
@@ -542,11 +548,11 @@ void Display::_drawBattery(const DeviceState& state) {
     _sprite->drawString("BATTERY", _W / 2, _H * 12 / 135);
     _sprite->setTextDatum(textdatum_t::top_left);
 
-    // Bar geometry
+    // Bar geometry — slightly shorter when sparkline is shown to free up vertical space
     const int BAR_X = _W * 18 / 240;
     const int BAR_Y = _H * 45 / 135;
     const int BAR_W = _W * 192 / 240;
-    const int BAR_H = _H * 28 / 135;
+    const int BAR_H = hasSparkline ? _H * 20 / 135 : _H * 28 / 135;
     const int TIP_H = BAR_H / 2;
     const int TIP_W = _W * 7 / 240 > 4 ? _W * 7 / 240 : 5;
 
@@ -567,8 +573,8 @@ void Display::_drawBattery(const DeviceState& state) {
         _sprite->fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, fillColor);
     }
 
-    // Voltage and percentage below the bar, positioned relative to it
-    int readY = _H * 96 / 135;
+    // Voltage and percentage — shift up when sparkline needs room below
+    int readY = hasSparkline ? _H * 82 / 135 : _H * 96 / 135;
     int voltX = BAR_X + BAR_W * 3 / 8;
     int pctX  = BAR_X + BAR_W * 6 / 8;
 
@@ -597,6 +603,44 @@ void Display::_drawBattery(const DeviceState& state) {
     _sprite->setTextDatum(textdatum_t::bottom_right);
     _sprite->drawString("[B]", _W - _W * 4 / 240, _H - 2);
     _sprite->setTextDatum(textdatum_t::top_left);
+
+    // Battery history sparkline
+    if (hasSparkline) {
+        // Collect batLevel values from SAMPLE entries only
+        static const int kMaxSamples = 120;
+        float vals[kMaxSamples];
+        int nVals = 0;
+        int total = _batLog->count();
+        for (int i = 0; i < total && nVals < kMaxSamples; i++) {
+            BatLogEntry e = _batLog->entry(i);
+            if ((BatLogType)e.type == BAT_LOG_SAMPLE && e.batLevel <= 100)
+                vals[nVals++] = (float)e.batLevel;
+        }
+        if (nVals >= 2) {
+            const int spX = BAR_X;
+            const int spW = BAR_W;
+            const int spY = _H * 97 / 135;  // top of sparkline area
+            const int spH = 16;              // height in pixels
+
+            // Faint grid lines at 25 %, 50 %, 75 %
+            for (int pct25 : {25, 50, 75}) {
+                int gy = spY + spH - 1 - (int)((float)pct25 / 100.0f * (spH - 1) + 0.5f);
+                _sprite->drawFastHLine(spX, gy, spW, _c(0x2104u, n));
+            }
+            // Draw line segments
+            for (int i = 1; i < nVals; i++) {
+                int x0 = spX + (int)((float)(i - 1) / (nVals - 1) * (spW - 1) + 0.5f);
+                int x1 = spX + (int)((float)i       / (nVals - 1) * (spW - 1) + 0.5f);
+                int y0 = spY + spH - 1 - constrain(
+                    (int)(vals[i-1] / 100.0f * (spH - 1) + 0.5f), 0, spH - 1);
+                int y1 = spY + spH - 1 - constrain(
+                    (int)(vals[i]   / 100.0f * (spH - 1) + 0.5f), 0, spH - 1);
+                uint16_t col = (vals[i] <= 20.0f) ? _c(TFT_RED, n)
+                             : (vals[i] <= 50.0f) ? _c(TFT_YELLOW, n) : _c(TFT_GREEN, n);
+                _sprite->drawLine(x0, y0, x1, y1, col);
+            }
+        }
+    }
 }
 
 void Display::_drawSysInfo(const DeviceState& state, int page) {

@@ -168,7 +168,7 @@ The **M5 front button** cycles through screens in order:
 | 1 | Time | Current time HH:MM:SS; timezone/LST label centered in cyan at the top (if set). Solar: date below the digits. Sidereal: no date. |
 | 2 | RA/Dec | Right Ascension and Declination from the telescope |
 | 3 | Alt/Az | Altitude and Azimuth from the telescope |
-| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%); `[B]` nav icon at bottom-right |
+| 4 | Battery | Charge bar with colour coding, voltage (V) and level (%); `[B]` nav icon at bottom-right. When battery telemetry logging is active and at least 2 SAMPLE entries exist, a sparkline of historical charge levels appears below the bar. |
 | — | Message | Temporary full-screen overlay triggered by BLE command |
 
 ### System Info pages
@@ -271,6 +271,7 @@ Returns a concise list of all accepted commands. The device sends one notify pac
 ← BEEP [<notes...>]
 ← SET_SCREEN CLINOMETER|TIME|RADEC|ALTAZ|BATTERY|SYSINFO-1..4
 ← PERSIST [CLEAR|RESTORE|READ]
+← START_BAT_LOG [<s>]|STOP_BAT_LOG|GET_BAT_LOG [<p>]|CLEAR_BAT_LOG
 ← REBOOT
 ← HELP
 ```
@@ -1030,6 +1031,80 @@ Performs a software reset. The device sends `OK REBOOTING`, waits ~200 ms for th
 
 ---
 
+### `START_BAT_LOG [<seconds>]`
+
+Enables battery telemetry logging and appends a `BOOT` marker entry immediately. Optional argument sets the periodic sample interval in seconds (default `300`, range `10`–`86400`).
+
+```
+→ START_BAT_LOG
+← OK BAT_LOG_STARTED 300
+
+→ START_BAT_LOG 60
+← OK BAT_LOG_STARTED 60
+```
+
+While active, the firmware records:
+
+| Event type | When |
+|---|---|
+| `BOOT` | Device boot or `START_BAT_LOG` |
+| `SAMPLE` | Every `<seconds>` seconds (periodic) |
+| `BLE_CON` | BLE central connected |
+| `BLE_DIS` | BLE central disconnected |
+| `SCR_CHG` | User navigated to a different screen |
+
+The active flag and sample interval are persisted in NVS (namespace `"batlog"`) and survive power cycles. Data accumulates in a 128-entry ring buffer also stored in NVS. When the buffer is full, the oldest entry is overwritten. All entries include a UTC timestamp (`0` if no `SET_TIME` has been sent), battery voltage (mV), battery level (0–100 or `255` if unknown), and the active screen index.
+
+---
+
+### `STOP_BAT_LOG`
+
+Disables battery telemetry logging. Existing entries are retained in NVS; `GET_BAT_LOG` continues to work after stopping.
+
+```
+→ STOP_BAT_LOG
+← OK BAT_LOG_STOPPED
+```
+
+---
+
+### `GET_BAT_LOG [<page>]`
+
+Retrieves a page of battery log entries. Each page delivers up to 16 entries plus a footer — 17 notifications total, well within the BLE TX queue limit.
+
+```
+→ GET_BAT_LOG
+← BATLOG <utcSec> BOOT    <batLevel> <batMv> <screenIdx>
+← BATLOG <utcSec> SAMPLE  <batLevel> <batMv> <screenIdx>
+← BATLOG <utcSec> SCR_CHG <batLevel> <batMv> <screenIdx>
+← BATLOG PAGE 0/2 COUNT 28
+
+→ GET_BAT_LOG 1
+← BATLOG <utcSec> SAMPLE  <batLevel> <batMv> <screenIdx>
+← ...
+← BATLOG PAGE 1/2 COUNT 28
+
+→ GET_BAT_LOG 99   (past the end)
+← BATLOG END 28
+```
+
+Entries are returned oldest-first. `<utcSec>` is 0 when no time was set. `<batLevel>` is 0–100 or `255` when unknown. `<batMv>` is the battery voltage in millivolts, or `0` when unavailable. `<screenIdx>` is the screen index that was active when the entry was recorded.
+
+When the log is empty or the requested page is past the last entry, the device responds with `BATLOG END <count>` instead of streaming entries.
+
+---
+
+### `CLEAR_BAT_LOG`
+
+Erases all battery log entries from NVS. The active/stopped state is preserved.
+
+```
+→ CLEAR_BAT_LOG
+← OK BAT_LOG_CLEARED
+```
+
+---
+
 ## Asynchronous Events
 
 The device can send unsolicited notifications on the Response characteristic. Subscribe to notifications to receive them.
@@ -1154,6 +1229,10 @@ options:
 | `persist-read` | | Show stored NVM values (validity flag and all keys) |
 | `persist-clear` | | Invalidate stored NVM settings with a single flash write |
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
+| `bat-log-start` | `[--interval SECS]` | Enable battery telemetry logging; sample interval in seconds (default 300, range 10–86400) |
+| `bat-log-stop` | | Disable battery telemetry logging (data retained in NVS) |
+| `bat-log` | | Retrieve and print the full battery log as an ISO8601 table (paged, 16 entries per BLE request) |
+| `bat-log-clear` | | Clear all stored battery log entries |
 | `reboot` | | Software-reset the device |
 | `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
 | `script` | `FILE` | Run m5ctl commands from a file or stdin (`-`), one per line; each line is parsed as m5ctl arguments (`set-time-now --timezone CEST`, `beep C4`, …); blank lines and `#` comments are ignored |
@@ -1200,6 +1279,11 @@ uv run tools/m5ctl persist                # save tz, offset, longitude, calibrat
 uv run tools/m5ctl persist-read           # inspect NVM contents
 uv run tools/m5ctl persist-clear          # invalidate NVM (1 flash write)
 uv run tools/m5ctl persist-restore        # re-enable and apply stored NVM values
+uv run tools/m5ctl bat-log-start          # enable battery logging (5-min sample interval)
+uv run tools/m5ctl bat-log-start --interval 60   # 1-minute samples
+uv run tools/m5ctl bat-log-stop           # disable logging (data retained)
+uv run tools/m5ctl bat-log               # retrieve and print full log as a table
+uv run tools/m5ctl bat-log-clear         # erase all stored log entries
 uv run tools/m5ctl reboot                 # software-reset the device
 uv run tools/m5ctl listen --stream 500
 uv run tools/m5ctl listen
@@ -1779,7 +1863,8 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 │   └── system/
 │       ├── PowerManager.h/.cpp  M5Unified init, battery voltage/level, reboot
 │       ├── Buttons.h/.cpp       Button polling, screen cycle, reboot, power-down tone cue
-│       └── Nvm.h/.cpp           NVM persistence (Preferences, namespace "clino")
+│       ├── Nvm.h/.cpp           NVM persistence (Preferences, namespace "clino")
+│       └── BatLog.h/.cpp        Battery telemetry ring buffer (NVS namespace "batlog", 128 entries)
 ├── tools/
 │   ├── m5ctl              Python 3 BLE command-line client
 │   └── demo.m5s           Full-device demo script for `m5ctl run`
@@ -1800,9 +1885,9 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 - BLE callbacks write commands into a volatile hand-off buffer (`pendingBleResponse`); the main loop drains this buffer each tick and issues the BLE notify. This keeps all M5 hardware access (IMU, display, power) exclusively on the main loop task.
 - Hardware is initialised through M5Unified (`M5Unified.h`); subsystems guarded with `M5.Imu.isEnabled()` / `M5.Speaker.isEnabled()` so the firmware degrades gracefully on boards without those peripherals. The display uses M5GFX sprite double-buffering for flicker-free rendering; sprites are allocated at **8-bit (palette) colour depth** so the full-screen buffer fits in internal SRAM on all supported display sizes — a 320×240 sprite at 16-bit would require ~150 KB, which cannot be allocated alongside the BLE stack on the ESP32; at 8-bit it drops to ~75 KB. All standard colours (black, white, red, green, yellow, grey variants) map exactly or near-exactly to the 216-entry web-safe palette used in this mode. All layout coordinates are computed from `M5.Display.width()` / `M5.Display.height()` cached once in `Display::begin()`, so every screen (bubble level, time, RA/Dec, Alt/Az, battery, message) scales proportionally to whatever resolution the target board reports.
 - The clinometer screen applies a **dirty-check** before each SPI DMA transfer: if pitch and roll have not changed by more than 0.1° and none of the discrete display fields (`batteryLevel`, `bleConnected`, `nightMode`, `imuAvailable`, `upsideDown`, `pitchAxis`, `rollAxis`) have changed since the last render, the frame is skipped entirely. The 100 ms refresh interval still gates re-entry, so the check runs at most 10 times per second. On a stationary device this eliminates continuous SPI bus traffic, freeing CPU bandwidth for BLE heartbeats and reducing average current draw. The other screens (Time, RA/Dec, Alt/Az, Battery, Message) redraw every cycle because they contain inherently dynamic content (wall-clock seconds, countdown timers) that is not stored in `DeviceState` fields.
-- Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library, namespace `"clino"`. Keys: `tz`, `tz_offset`, `longitude`, `cal_gx/gy/gz`, `pitch_ax`, `roll_ax`, `valid`. The `huge_app.csv` partition table reserves 20 KB for NVS — the settings payload is under 60 bytes. NVS writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
+- Non-volatile storage uses the ESP32 **NVS** (Non-Volatile Storage) via the Arduino `Preferences` library. Two namespaces are in use: `"clino"` for user settings (keys: `tz`, `tz_offset`, `longitude`, `cal_gx/gy/gz`, `pitch_ax`, `roll_ax`, `valid`; payload under 60 bytes; written only on explicit `PERSIST` commands) and `"batlog"` for battery telemetry (keys: `active`, `interval`, `head`, `cnt`, `data`; 1536-byte ring buffer blob; written only when logging is enabled via `START_BAT_LOG`). The `huge_app.csv` partition table reserves 20 KB for NVS — sufficient for both namespaces. NVM settings writes happen only on explicit `PERSIST` commands; a validity byte written last acts as an atomic commit flag so a power loss during a write leaves NVM cleanly invalid rather than partially written. `PERSIST CLEAR` costs exactly one NVS write (the validity byte); all data keys are left in flash and can be re-enabled by `PERSIST RESTORE`.
 - The clock subsystem uses `esp_timer_get_time()` (int64_t µs, no 49-day wrap) to track elapsed time since the last UTC sync and to advance the Q40 fixed-point sidereal phase. All other timing uses non-blocking `millis()` gates — no `delay()` except the mandatory 1 ms yield at the end of each loop tick and the 200 ms drain wait before `ESP.restart()` on `REBOOT` (blocking is acceptable there since the device is about to reset).
-- Flash usage: ~55% of 3 MB. RAM usage: ~13% of 320 KB.
+- Flash usage: ~58% of 3 MB. RAM usage: ~14% of 320 KB.
 
 ---
 
@@ -1810,4 +1895,4 @@ Set the environment variable `M5_ADDR` as an alternative to `--device`.
 
 Thanks to [@senshu-hiro](https://github.com/senshu-hiro) for the idea and initial implementation of the 3D orientation viewer, and for suggesting several features that made it into the firmware: the `BEEP` command, time-zone support in `SET_TIME`, the `CALIBRATE` command, multi-product support (Core 2 and CoreS3), and adaptive newline termination in BLE responses.
 
-Thanks to [@senshu-hiro2](https://github.com/senshu-hiro2) for reporting the RTC-less device bug (M5Stack Grey) and submitting the patch that became Changes 1–5 in patch-23b: the `SET_TIME` in-memory anchor fix, `SET_TIME_ZONE` offset validation, `rebuildAnchor` conditional guard, timezone label centering, and the `~` alias for negative UTC offsets in `m5ctl`. Also for proposing the multi-device config format, `m5ctl list`, `m5ctl version`, and BLE connection retry — features that became Issues 1–5 of the m5ctl improvement series. Also for identifying the SPI bus contention between the display refresh loop and the BLE stack on large-screen devices (Core2, Grey), and for proposing the initial patch that led to the clinometer dirty-check optimization.
+Thanks to [@senshu-hiro2](https://github.com/senshu-hiro2) for reporting the RTC-less device bug (M5Stack Grey) and submitting the patch that became Changes 1–5 in patch-23b: the `SET_TIME` in-memory anchor fix, `SET_TIME_ZONE` offset validation, `rebuildAnchor` conditional guard, timezone label centering, and the `~` alias for negative UTC offsets in `m5ctl`. Also for proposing the multi-device config format, `m5ctl list`, `m5ctl version`, and BLE connection retry — features that became Issues 1–5 of the m5ctl improvement series. Also for identifying the SPI bus contention between the display refresh loop and the BLE stack on large-screen devices (Core2, Grey), and for proposing the initial patch that led to the clinometer dirty-check optimization. Also for suggesting the battery telemetry logging feature (`START_BAT_LOG` / `GET_BAT_LOG` / sparkline).
