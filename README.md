@@ -190,6 +190,24 @@ Two persistent indicators appear on every screen:
 
 - **BLE dot** (top-right corner) — green when a central is connected, dark when not.
 - **Battery bar** (bottom-left of the clinometer screen) — a slim horizontal bar of up to 9 segments shows the charge level; each segment lights up for every 10% above 0%. The bar is dark green at 40% or above, dark amber at 20–39%, and dark red below 20%. In night mode all colours shift to red to preserve dark-adapted vision.
+
+### Battery screen — history sparkline
+
+When battery telemetry logging is active (see [`START_BAT_LOG`](#start_bat_log-seconds)) and the log contains at least 2 `SAMPLE` entries, a small sparkline graph appears below the voltage/percentage readout. The graph plots **charge level (%)** over time — only periodic `SAMPLE` entries are graphed; `BOOT`, `BLE_CON`, `BLE_DIS`, and `SCR_CHG` events do not contribute data points.
+
+Up to **120 samples** are shown. All available SAMPLE entries (up to that cap) are spread evenly from the left edge (oldest) to the right edge (most recent) of the chart.
+
+Three faint horizontal reference lines divide the chart area into four bands:
+
+| Band | Range | Description |
+|---|---|---|
+| Top | 75–100% | Healthy charge |
+| Upper-mid | 50–75% | Moderate charge |
+| Lower-mid | 25–50% | Low charge |
+| Bottom | 0–25% | Critical charge |
+
+The line colour for each segment mirrors the main charge bar: **green** above 50%, **yellow** at 21–50%, **red** at 20% or below.
+
 ## Button behaviour
 
 | Button | Short press | Long press |
