@@ -278,10 +278,10 @@ void Display::_drawClinometer(const DeviceState& state) {
     // Battery bar — 10 segments at bottom of right panel; lit up to level, dim beyond
     if (state.batteryLevel >= 0) {
         int lvl = state.batteryLevel;
-        uint16_t col = (lvl < 20) ? _c(0x6000u, n)   // dark red
-                     : (lvl < 40) ? _c(0x7A40u, n)   // dark amber
-                     :              _c(0x0340u,  n);  // dark green
-        uint16_t dim = _c(0x2104u, n);
+        uint16_t col = (lvl < 20) ? _c(TFT_MAROON,    n)  // dark red
+                     : (lvl < 40) ? _c(0x7A40u,     n)  // dark amber (R=3,G=2 in RGB332 — visible on 8-bit sprites)
+                     :              _c(TFT_DARKGREEN, n); // dark green (0x0340 mapped to G=1 in RGB332, invisible)
+        uint16_t dim = _c(TFT_DARKGREY, n);
         for (int i = 0; i <= 9; i++)
             _sprite->fillRect(px + i * 7, _H - 6, 6, 4, lvl >= i * 10 ? col : dim);
     }
@@ -539,42 +539,62 @@ void Display::_drawBattery(const DeviceState& state) {
 
     // Decide whether we have enough SAMPLE history to show a sparkline.
     // Check for at least 2 entries; the sparkline drawing below guards nVals>=2.
-    bool hasSparkline = (_batLog != nullptr && _batLog->count() >= 2);
+    bool hasSparkline = (_batLog != nullptr && _batLog->isActive() && _batLog->count() >= 2);
+
+    // Font metrics — queried once for absolute-pixel layout in sparkline mode
+    _sprite->setFont(&fonts::Font4);
+    const int fh4 = _sprite->fontHeight();
+    _sprite->setFont(&fonts::Font2);
+    const int fh2 = _sprite->fontHeight();
+    _sprite->setFont(&fonts::Font4);
 
     // Title
-    _sprite->setFont(&fonts::Font4);
     _sprite->setTextColor(_c(TFT_CYAN, n));
     _sprite->setTextDatum(textdatum_t::top_center);
-    _sprite->drawString("BATTERY", _W / 2, _H * 12 / 135);
+    const int titleY = _H * 12 / 135;
+    _sprite->drawString("BATTERY", _W / 2, titleY);
     _sprite->setTextDatum(textdatum_t::top_left);
 
-    // Bar geometry — slightly shorter when sparkline is shown to free up vertical space
     const int BAR_X = _W * 18 / 240;
-    const int BAR_Y = _H * 45 / 135;
     const int BAR_W = _W * 192 / 240;
-    const int BAR_H = hasSparkline ? _H * 20 / 135 : _H * 28 / 135;
-    const int TIP_H = BAR_H / 2;
-    const int TIP_W = _W * 7 / 240 > 4 ? _W * 7 / 240 : 5;
 
-    // Battery body outline
-    _sprite->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, _c(TFT_DARKGREY, n));
-    // Positive terminal nub on the right
-    _sprite->fillRect(BAR_X + BAR_W, BAR_Y + (BAR_H - TIP_H) / 2, TIP_W, TIP_H, _c(TFT_DARKGREY, n));
+    if (!hasSparkline) {
+        // Battery bar — only shown when there is no sparkline history
+        const int BAR_Y = _H * 45 / 135;
+        const int BAR_H = _H * 28 / 135;
+        const int TIP_H = BAR_H / 2;
+        const int TIP_W = _W * 7 / 240 > 4 ? _W * 7 / 240 : 5;
 
-    // Fill colour based on level
-    uint16_t fillColor;
-    if      (pct < 0)   fillColor = _c(TFT_DARKGREY, n);
-    else if (pct <= 20) fillColor = _c(TFT_RED, n);
-    else if (pct <= 50) fillColor = _c(TFT_YELLOW, n);
-    else                fillColor = _c(TFT_GREEN, n);
+        _sprite->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, _c(TFT_DARKGREY, n));
+        _sprite->fillRect(BAR_X + BAR_W, BAR_Y + (BAR_H - TIP_H) / 2, TIP_W, TIP_H, _c(TFT_DARKGREY, n));
 
-    int fillW = (pct >= 0) ? (int)((float)pct / 100.0f * (BAR_W - 4)) : 0;
-    if (fillW > 0) {
-        _sprite->fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, fillColor);
+        uint16_t fillColor;
+        if      (pct < 0)   fillColor = _c(TFT_DARKGREY, n);
+        else if (pct <= 20) fillColor = _c(TFT_RED, n);
+        else if (pct <= 50) fillColor = _c(TFT_YELLOW, n);
+        else                fillColor = _c(TFT_GREEN, n);
+
+        int fillW = (pct >= 0) ? (int)((float)pct / 100.0f * (BAR_W - 4)) : 0;
+        if (fillW > 0)
+            _sprite->fillRect(BAR_X + 2, BAR_Y + 2, fillW, BAR_H - 4, fillColor);
     }
 
-    // Voltage and percentage — shift up when sparkline needs room below
-    int readY = hasSparkline ? _H * 82 / 135 : _H * 96 / 135;
+    // Sparkline layout — four rows, each taking its natural height + kGap margin,
+    // with V/% centered in its slot between title and graph:
+    //   titleY  … titleY+fh4          title
+    //   +kGap gap
+    //   spY-fh4 … spY                 V/% (middle_center at readY)
+    //   +kGap gap
+    //   spY     … footerTop-kGap      graph
+    //   +kGap gap
+    //   footerTop … _H-2              footer ([B])
+    const int kGap      = 2;
+    const int footerTop = _H - 2 - fh2;
+    const int spY       = hasSparkline ? titleY + 2 * fh4 + 2 * kGap : 0;
+    const int spH       = hasSparkline ? footerTop - kGap - spY       : 0;
+    int readY = hasSparkline
+        ? titleY + fh4 + kGap + fh4 / 2   // middle of V/% slot
+        : _H * 96 / 135;
     int voltX = BAR_X + BAR_W * 3 / 8;
     int pctX  = BAR_X + BAR_W * 6 / 8;
 
@@ -619,13 +639,11 @@ void Display::_drawBattery(const DeviceState& state) {
         if (nVals >= 2) {
             const int spX = BAR_X;
             const int spW = BAR_W;
-            const int spY = _H * 97 / 135;  // top of sparkline area
-            const int spH = 16;              // height in pixels
 
             // Faint grid lines at 25 %, 50 %, 75 %
             for (int pct25 : {25, 50, 75}) {
                 int gy = spY + spH - 1 - (int)((float)pct25 / 100.0f * (spH - 1) + 0.5f);
-                _sprite->drawFastHLine(spX, gy, spW, _c(0x2104u, n));
+                _sprite->drawFastHLine(spX, gy, spW, _c(TFT_DARKGREY, n));
             }
             // Draw line segments
             for (int i = 1; i < nVals; i++) {
@@ -743,7 +761,7 @@ void Display::_drawSysInfo(const DeviceState& state, int page) {
         _sprite->drawString(buf, vx, row0 + rowH + 16);
         for (int i = 0; i < 10; i++)
             _sprite->fillRect(vx + i * 9, row0 + rowH + 24, 6, 6,
-                              ardPct >= (i + 1) * 10 ? ardCol : _c(0x2104u, n));
+                              ardPct >= (i + 1) * 10 ? ardCol : _c(TFT_DARKGREY, n));
 
 #ifdef CONFIG_BT_BTC_TASK_STACK_SIZE
         _sprite->setFont(&fonts::Font2);
@@ -768,7 +786,7 @@ void Display::_drawSysInfo(const DeviceState& state, int page) {
             _sprite->drawString(buf, vx, row0 + rowH * 3 + 16);
             for (int i = 0; i < 10; i++)
                 _sprite->fillRect(vx + i * 9, row0 + rowH * 3 + 24, 6, 6,
-                                  btcPct >= (i + 1) * 10 ? btcCol : _c(0x2104u, n));
+                                  btcPct >= (i + 1) * 10 ? btcCol : _c(TFT_DARKGREY, n));
         }
 #endif
 
