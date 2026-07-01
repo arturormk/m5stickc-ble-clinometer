@@ -3,6 +3,7 @@
 
 import asyncio
 import argparse
+import csv
 import io
 import os
 import re
@@ -17,7 +18,7 @@ from bleak.exc import BleakDeviceNotFoundError
 
 _CONF_FILE = pathlib.Path(__file__).parent.parent / ".m5ctl.conf"
 _ENV_VAR   = "M5_BLE_ADDR"
-_VERSION   = "1.3.144"
+_VERSION   = "1.3.148"
 
 
 def _get_conf_path() -> pathlib.Path:
@@ -460,7 +461,7 @@ async def cmd_run(
                         sys.exit(1)
 
 
-async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False) -> None:
+async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False, csv_output: bool = False) -> None:
     """Retrieve the full battery telemetry log via paged GET_BAT_LOG requests."""
     entries: list[str] = []
     queue: "asyncio.Queue[str]" = asyncio.Queue()
@@ -504,22 +505,30 @@ async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False) -> 
 
             page += 1
 
-    if not entries:
-        print("(no log entries)")
-        return
-
     _SCREEN_NAMES_MAP = {
         "0": "CLINOMETER", "1": "TIME",    "2": "RADEC",     "3": "ALTAZ",
         "4": "BATTERY",    "5": "MESSAGE", "6": "SYSINFO-1", "7": "SYSINFO-2",
         "8": "SYSINFO-3",  "9": "SYSINFO-4",
     }
-    print(f"{'Timestamp':<22} {'Type':<8} {'Level':>5} {'Voltage':>8}  {'Screen'}")
-    print("-" * 60)
+
+    if csv_output:
+        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer.writerow(["unix_epoch", "timestamp_utc", "type", "battery_pct", "voltage_mv", "screen"])
+    elif not entries:
+        print("(no log entries)")
+        return
+    else:
+        print(f"{'Timestamp':<22} {'Type':<8} {'Level':>5} {'Voltage':>8}  {'Screen'}")
+        print("-" * 60)
+
     for line in entries:
         # "BATLOG <utcSec> <TYPE> <batLevel> <batMv> <screenIdx>"
         parts = line.split()
         if len(parts) < 6:
-            print(line)
+            if csv_output:
+                print(f"warning: skipping malformed entry: {line!r}", file=sys.stderr)
+            else:
+                print(line)
             continue
         try:
             utc_sec   = int(parts[1])
@@ -528,7 +537,27 @@ async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False) -> 
             bat_mv    = int(parts[4])
             scr_idx   = parts[5]
         except (IndexError, ValueError):
-            print(line)
+            if csv_output:
+                print(f"warning: skipping malformed entry: {line!r}", file=sys.stderr)
+            else:
+                print(line)
+            continue
+
+        scr_name = _SCREEN_NAMES_MAP.get(scr_idx, scr_idx)
+
+        if csv_output:
+            if utc_sec > 0:
+                try:
+                    iso_ts = datetime.fromtimestamp(utc_sec, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                except (OSError, ValueError):
+                    iso_ts = ""
+                epoch_str = str(utc_sec)
+            else:
+                iso_ts = ""
+                epoch_str = ""
+            level_str = str(bat_level) if bat_level <= 100 else ""
+            volt_str  = str(bat_mv) if bat_mv > 0 else ""
+            writer.writerow([epoch_str, iso_ts, type_str, level_str, volt_str, scr_name])
             continue
 
         if utc_sec > 0:
@@ -542,7 +571,6 @@ async def cmd_bat_log(address: str, timeout: float, print_cmd: bool = False) -> 
 
         level_str = f"{bat_level}%" if bat_level <= 100 else "?"
         volt_str  = f"{bat_mv / 1000:.3f}V" if bat_mv > 0 else "?"
-        scr_name  = _SCREEN_NAMES_MAP.get(scr_idx, scr_idx)
         print(f"{ts:<22} {type_str:<8} {level_str:>5} {volt_str:>8}  {scr_name}")
 
 
@@ -1076,7 +1104,9 @@ p = sub.add_parser("bat-log-start",
 p.add_argument("--interval", type=int, default=300, metavar="SECS",
                help="Sample interval in seconds (default: 300, range: 10-86400)")
 sub.add_parser("bat-log-stop",  help="Disable battery telemetry logging")
-sub.add_parser("bat-log",       help="Retrieve and display the full battery telemetry log")
+p = sub.add_parser("bat-log",   help="Retrieve and display the full battery telemetry log")
+p.add_argument("--csv", action="store_true",
+               help="Output as CSV (unix_epoch,timestamp_utc,type,battery_pct,voltage_mv,screen)")
 sub.add_parser("bat-log-clear", help="Clear the battery telemetry log ring buffer")
 
 _SCREEN_NAMES = ["CLINOMETER", "TIME", "RADEC", "ALTAZ", "BATTERY",
@@ -1553,7 +1583,7 @@ def dispatch(args) -> None:
         case "bat-log-stop":
             do_send(args, "STOP_BAT_LOG")
         case "bat-log":
-            run(cmd_bat_log(args.device, args.timeout, print_cmd=args.print_cmd))
+            run(cmd_bat_log(args.device, args.timeout, print_cmd=args.print_cmd, csv_output=args.csv))
         case "bat-log-clear":
             do_send(args, "CLEAR_BAT_LOG")
         case "reboot":

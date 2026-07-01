@@ -1614,3 +1614,72 @@ async def test_cmd_run_nested_outer_executes_inner_if_branch(m5ctl, monkeypatch,
     out = capsys.readouterr().out
     assert "timeout_branch" in out
     assert "success_branch" not in out
+
+
+# ---------------------------------------------------------------------------
+# --csv flag in parser (bat-log)
+# ---------------------------------------------------------------------------
+
+def test_bat_log_csv_flag_parses(m5ctl):
+    args = m5ctl.parser.parse_args(["bat-log", "--csv"])
+    assert args.csv is True
+
+
+def test_bat_log_csv_flag_defaults_false(m5ctl):
+    args = m5ctl.parser.parse_args(["bat-log"])
+    assert args.csv is False
+
+
+# ---------------------------------------------------------------------------
+# cmd_bat_log — table and --csv output
+# ---------------------------------------------------------------------------
+
+_BAT_LOG_ENTRIES = [
+    "BATLOG 1747233130 BOOT 87 3954 0",       # normal entry
+    "BATLOG 1747233430 SAMPLE 255 0 4",       # unknown level, unavailable voltage
+    "BATLOG 0 SCR_CHG 50 3700 1",             # no timestamp set
+    "BATLOG garbage line here",               # malformed — too few fields
+]
+
+
+def _bat_log_harness(m5ctl, monkeypatch, entries):
+    """Wire GET_BAT_LOG 0 to return *entries* followed by a single-page footer."""
+    _make_cmd_run_harness(m5ctl, monkeypatch, {
+        "GET_BAT_LOG 0": [*entries, "BATLOG PAGE 0/1 COUNT " + str(len(entries))],
+    })
+
+
+async def test_bat_log_table_output(m5ctl, monkeypatch, capsys):
+    _bat_log_harness(m5ctl, monkeypatch, _BAT_LOG_ENTRIES)
+    await m5ctl.cmd_bat_log("AA:BB:CC:DD:EE:FF", 5.0, csv_output=False)
+    out = capsys.readouterr().out
+    assert "Timestamp" in out and "Voltage" in out  # header
+    assert "2025-05-14T14:32:10Z   BOOT       87%   3.954V  CLINOMETER" in out
+    assert "2025-05-14T14:37:10Z   SAMPLE       ?        ?  BATTERY" in out
+    assert "(no time)              SCR_CHG    50%   3.700V  TIME" in out
+    assert "BATLOG garbage line here" in out  # malformed line echoed as-is
+
+
+async def test_bat_log_csv_output(m5ctl, monkeypatch, capsys):
+    _bat_log_harness(m5ctl, monkeypatch, _BAT_LOG_ENTRIES)
+    await m5ctl.cmd_bat_log("AA:BB:CC:DD:EE:FF", 5.0, csv_output=True)
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert lines[0] == "unix_epoch,timestamp_utc,type,battery_pct,voltage_mv,screen"
+    assert lines[1] == "1747233130,2025-05-14T14:32:10Z,BOOT,87,3954,CLINOMETER"
+    assert lines[2] == "1747233430,2025-05-14T14:37:10Z,SAMPLE,,,BATTERY"
+    assert lines[3] == ",,SCR_CHG,50,3700,TIME"
+    assert len(lines) == 4  # malformed entry produces no CSV row
+    assert "skipping malformed entry" in captured.err
+
+
+async def test_bat_log_no_entries_table(m5ctl, monkeypatch, capsys):
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"GET_BAT_LOG 0": ["BATLOG END 0"]})
+    await m5ctl.cmd_bat_log("AA:BB:CC:DD:EE:FF", 5.0, csv_output=False)
+    assert capsys.readouterr().out.strip() == "(no log entries)"
+
+
+async def test_bat_log_no_entries_csv(m5ctl, monkeypatch, capsys):
+    _make_cmd_run_harness(m5ctl, monkeypatch, {"GET_BAT_LOG 0": ["BATLOG END 0"]})
+    await m5ctl.cmd_bat_log("AA:BB:CC:DD:EE:FF", 5.0, csv_output=True)
+    assert capsys.readouterr().out.strip() == "unix_epoch,timestamp_utc,type,battery_pct,voltage_mv,screen"

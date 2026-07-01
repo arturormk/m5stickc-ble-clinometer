@@ -1252,7 +1252,7 @@ options:
 | `persist-restore` | | Re-enable and apply last stored NVM values in-session (no reboot) |
 | `bat-log-start` | `[--interval SECS]` | Enable battery telemetry logging; sample interval in seconds (default 300, range 10–86400) |
 | `bat-log-stop` | | Disable battery telemetry logging (data retained in NVS) |
-| `bat-log` | | Retrieve and print the full battery log as an ISO8601 table (paged, 16 entries per BLE request) |
+| `bat-log` | `[--csv]` | Retrieve and print the full battery log as an ISO8601 table (paged, 16 entries per BLE request); `--csv` prints `unix_epoch,timestamp_utc,type,battery_pct,voltage_mv,screen` instead, for import into a spreadsheet or Python |
 | `bat-log-clear` | | Clear all stored battery log entries |
 | `reboot` | | Software-reset the device |
 | `exec` | `FILE` | Send raw BLE commands from a file or stdin (`-`), one per line; blank lines and `#` comments are ignored |
@@ -1304,6 +1304,7 @@ uv run tools/m5ctl bat-log-start          # enable battery logging (5-min sample
 uv run tools/m5ctl bat-log-start --interval 60   # 1-minute samples
 uv run tools/m5ctl bat-log-stop           # disable logging (data retained)
 uv run tools/m5ctl bat-log               # retrieve and print full log as a table
+uv run tools/m5ctl bat-log --csv > battery.csv   # retrieve as CSV (voltage in mV, ISO8601 + unix epoch timestamps)
 uv run tools/m5ctl bat-log-clear         # erase all stored log entries
 uv run tools/m5ctl reboot                 # software-reset the device
 uv run tools/m5ctl listen --stream 500
